@@ -227,10 +227,10 @@ func (s *Store) LastCheck(ctx context.Context, monitorID int64) (*CheckRow, erro
 		okInt     int
 	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT monitor_id, checked_at, ok, status_code, latency_ms, error
+		SELECT monitor_id, type, checked_at, ok, status_code, latency_ms, error, warning
 		FROM checks
 		WHERE id = (SELECT MAX(id) FROM checks WHERE monitor_id = ?)`,
-		monitorID).Scan(&r.MonitorID, &checkedAt, &okInt, &r.StatusCode, &r.LatencyMS, &r.Error)
+		monitorID).Scan(&r.MonitorID, &r.Type, &checkedAt, &okInt, &r.StatusCode, &r.LatencyMS, &r.Error, &r.Warning)
 
 	// 행이 없는 건 에러가 아니라 "아직 체크 안 함"이다.
 	// sql.ErrNoRows 를 errors.Is 로 구분해 호출부에 nil 을 준다.

@@ -12,11 +12,15 @@ import (
 // CheckRow 는 checks 테이블에 넣을 한 행이다.
 type CheckRow struct {
 	MonitorID  int64
+	Type       string
 	CheckedAt  time.Time
 	OK         bool
 	StatusCode int
 	LatencyMS  int64
 	Error      string
+
+	// Warning 은 실패는 아니지만 알아둘 것이다 (tls 인증서 만료 임박 등).
+	Warning string
 }
 
 // SyncMonitors 는 설정 파일의 모니터를 DB에 반영하고 이름→id 맵을 돌려준다.
@@ -102,8 +106,8 @@ func (s *Store) InsertChecks(ctx context.Context, rows []CheckRow) error {
 		// 같은 SQL 을 여러 번 실행할 때는 Prepare 가 이득이다.
 		// SQL 파싱과 실행 계획 수립을 한 번만 한다.
 		stmt, err := tx.PrepareContext(ctx, `
-			INSERT INTO checks (monitor_id, checked_at, ok, status_code, latency_ms, error)
-			VALUES (?, ?, ?, ?, ?, ?)`)
+			INSERT INTO checks (monitor_id, type, checked_at, ok, status_code, latency_ms, error, warning)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
 		if err != nil {
 			return fmt.Errorf("체크 삽입 준비 실패: %w", err)
 		}
@@ -117,8 +121,12 @@ func (s *Store) InsertChecks(ctx context.Context, rows []CheckRow) error {
 			if r.OK {
 				okVal = 1
 			}
+			typ := r.Type
+			if typ == "" {
+				typ = "http"
+			}
 			if _, err := stmt.ExecContext(ctx,
-				r.MonitorID, unix(r.CheckedAt), okVal, r.StatusCode, r.LatencyMS, r.Error,
+				r.MonitorID, typ, unix(r.CheckedAt), okVal, r.StatusCode, r.LatencyMS, r.Error, r.Warning,
 			); err != nil {
 				return fmt.Errorf("체크 저장 실패(monitor_id=%d): %w", r.MonitorID, err)
 			}
