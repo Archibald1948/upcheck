@@ -60,6 +60,15 @@ func New() *Checker {
 	}
 }
 
+// Close 는 유휴 커넥션을 정리한다. 종료 시 한 번 부른다.
+//
+// 안 불러도 IdleConnTimeout(90초) 이 지나면 알아서 닫히지만,
+// 그때까지 커넥션과 그에 딸린 goroutine 이 남아 있다.
+// 종료 직후 goroutine 수를 재는 테스트에서 이게 잡음으로 잡힌다.
+func (c *Checker) Close() {
+	c.client.CloseIdleConnections()
+}
+
 // Check 는 모니터 하나를 검사한다.
 //
 // 첫 번째 인자로 context.Context 를 받는 건 Go의 강한 관례다.
