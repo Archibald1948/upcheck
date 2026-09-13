@@ -13,15 +13,16 @@ Go를 처음 접한다는 전제로 썼고, 설명마다 **이 레포의 실제 
 | [03-메서드와-인터페이스.md](03-메서드와-인터페이스.md) | 메서드, 값/포인터 수신자, 인터페이스, `error` | checker 패키지 볼 때 |
 | [04-에러-처리.md](04-에러-처리.md) | 에러가 값이라는 것, `%w`, `errors.Is/As`, `defer`/`panic` | 코드 전반 |
 | [05-M0-순차-체크.md](05-M0-순차-체크.md) | M0에서 만든 것, 측정 결과, M1이 필요한 이유 | M0 끝나고 |
+| [06-동시성-기초.md](06-동시성-기초.md) | goroutine, channel, select, `sync`, 누수 4가지 패턴 | scheduler 패키지 볼 때 |
+| [07-context.md](07-context.md) | 취소 전파, 타임아웃, 취소되지 않는 것 | scheduler 패키지 볼 때 |
+| [08-M1-동시성.md](08-M1-동시성.md) | 스케줄러 두 방식 비교와 선택 근거 (측정값) | M1 끝나고 |
 
 ## 앞으로 추가될 문서
 
 마일스톤을 진행하면서 채운다.
 
-- `06-동시성-기초.md` — goroutine, channel, select, `sync` (M1)
-- `07-context.md` — 취소 전파, 타임아웃, goroutine 누수 (M1)
-- `08-데이터베이스.md` — `database/sql`, SQLite, 마이그레이션 (M2)
-- `09-테스트.md` — `go test`, 테이블 테스트, `-race` (전 구간)
+- `09-데이터베이스.md` — `database/sql`, SQLite, 마이그레이션 (M2)
+- `10-테스트.md` — `go test`, 테이블 테스트, `-race` (전 구간)
 
 ## 참고 자료
 
