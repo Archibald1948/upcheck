@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gimseongsu/upcheck/internal/config"
+	"github.com/Archibald1948/upcheck/internal/config"
 )
 
 // Result 는 체크 한 번의 결과다.

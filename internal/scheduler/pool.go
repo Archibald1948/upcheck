@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gimseongsu/upcheck/internal/checker"
-	"github.com/gimseongsu/upcheck/internal/config"
+	"github.com/Archibald1948/upcheck/internal/checker"
+	"github.com/Archibald1948/upcheck/internal/config"
 )
 
 // Pool 은 "중앙 스케줄러 + 고정 개수 워커풀" 방식이다.

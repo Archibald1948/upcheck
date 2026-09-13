@@ -1,4 +1,4 @@
-module github.com/gimseongsu/upcheck
+module github.com/Archibald1948/upcheck
 
 go 1.27.1
 

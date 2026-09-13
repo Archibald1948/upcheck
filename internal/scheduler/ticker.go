@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gimseongsu/upcheck/internal/checker"
-	"github.com/gimseongsu/upcheck/internal/config"
+	"github.com/Archibald1948/upcheck/internal/checker"
+	"github.com/Archibald1948/upcheck/internal/config"
 )
 
 // TickerScheduler 는 "모니터마다 time.Ticker goroutine 하나" 방식이다.

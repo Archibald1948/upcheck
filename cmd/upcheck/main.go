@@ -24,9 +24,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gimseongsu/upcheck/internal/checker"
-	"github.com/gimseongsu/upcheck/internal/config"
-	"github.com/gimseongsu/upcheck/internal/scheduler"
+	"github.com/Archibald1948/upcheck/internal/checker"
+	"github.com/Archibald1948/upcheck/internal/config"
+	"github.com/Archibald1948/upcheck/internal/scheduler"
 )
 
 func main() {

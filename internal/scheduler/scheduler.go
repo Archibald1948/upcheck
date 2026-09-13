@@ -13,8 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gimseongsu/upcheck/internal/checker"
-	"github.com/gimseongsu/upcheck/internal/config"
+	"github.com/Archibald1948/upcheck/internal/checker"
+	"github.com/Archibald1948/upcheck/internal/config"
 )
 
 // Job 은 워커에게 넘기는 작업 하나다.

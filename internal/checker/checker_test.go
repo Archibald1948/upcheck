@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gimseongsu/upcheck/internal/config"
+	"github.com/Archibald1948/upcheck/internal/config"
 )
 
 // httptest.NewServer 는 진짜 포트를 열어 로컬 HTTP 서버를 띄운다.

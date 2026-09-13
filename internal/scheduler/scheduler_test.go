@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gimseongsu/upcheck/internal/checker"
-	"github.com/gimseongsu/upcheck/internal/config"
+	"github.com/Archibald1948/upcheck/internal/checker"
+	"github.com/Archibald1948/upcheck/internal/config"
 )
 
 // quietLogger 는 테스트 출력이 경고로 뒤덮이지 않게 로그를 버린다.
