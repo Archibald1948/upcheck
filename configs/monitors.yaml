@@ -27,6 +27,7 @@ alerts:
   # slack_webhook: ${UPCHECK_SLACK_WEBHOOK}
 
 monitors:
+  # ── http: 상태 코드 · 본문 키워드 ──
   - name: Google
     type: http
     target: https://www.google.com
@@ -71,3 +72,40 @@ monitors:
     type: http
     target: https://example.com
     enabled: false
+
+  # ── tcp: 포트가 열려 있는지만 확인 ──
+  # HTTP 를 안 하는 것(DB, 메시지 큐, SMTP)을 감시할 때 쓴다.
+  # 포트를 반드시 적어야 한다 — 기본 포트를 짐작할 근거가 없다.
+  - name: Google DNS (TCP)
+    type: tcp
+    target: 8.8.8.8:53
+    interval_sec: 60
+    timeout_ms: 3000
+
+  # ── tls: 인증서 만료까지 남은 일수 ──
+  # 포트를 생략하면 443 으로 본다. https:// 를 붙여 적어도 받아준다.
+  # 만료가 cert_warn_days 이하로 남으면 '경고'가 뜬다 — 실패가 아니다.
+  # 인증서가 30일 뒤에 만료돼도 서비스는 지금 멀쩡히 돌고 있기 때문이다.
+  - name: GitHub 인증서
+    type: tls
+    target: github.com
+    interval_sec: 3600
+    timeout_ms: 5000
+    cert_warn_days: 30
+
+  # ── dns: 레코드가 기대값으로 해석되는지 ──
+  # DNS 가 엉뚱한 곳을 가리키는 사고는 서버가 멀쩡해도 서비스를 죽인다.
+  # HTTP 체크로는 안 잡힌다 — 엉뚱한 서버가 200 을 잘 돌려주기 때문이다.
+  #
+  # record: A, AAAA, CNAME, TXT, MX, NS (기본 A)
+  # expect: 기대하는 값들. 하나라도 나오면 정상. 비우면 "해석만 되면 정상".
+  # resolver: 쓸 DNS 서버 (예: 8.8.8.8:53). 비우면 시스템 기본값.
+  - name: Google DNS 레코드
+    type: dns
+    target: dns.google
+    record: A
+    expect:
+      - 8.8.8.8
+      - 8.8.4.4
+    interval_sec: 300
+    timeout_ms: 3000
