@@ -1,0 +1,50 @@
+# upcheck 설정 파일
+#
+# workers: M1(워커풀)에서 사용할 동시 실행 개수. M0에서는 무시된다.
+workers: 8
+
+monitors:
+  - name: Google
+    type: http
+    target: https://www.google.com
+    interval_sec: 60
+    timeout_ms: 5000
+    expected_status: 200
+
+  - name: GitHub
+    type: http
+    target: https://github.com
+    interval_sec: 60
+    timeout_ms: 5000
+    expected_status: 200
+
+  - name: Go 공식 사이트
+    type: http
+    target: https://go.dev
+    interval_sec: 60
+    timeout_ms: 5000
+    expected_status: 200
+    keyword: Go          # 응답 본문에 이 문자열이 있어야 정상으로 본다
+
+  - name: Cloudflare
+    type: http
+    target: https://www.cloudflare.com
+    interval_sec: 60
+    timeout_ms: 5000
+
+  # 일부러 실패하는 모니터 — DOWN 출력이 어떻게 나오는지 보려고 넣어둔다
+  - name: 없는 도메인
+    type: http
+    target: https://this-domain-does-not-exist-upcheck.invalid
+    timeout_ms: 3000
+
+  - name: 404 나는 주소
+    type: http
+    target: https://github.com/이런건없다-upcheck-test
+    expected_status: 200
+
+  # enabled: false 면 건너뛴다
+  - name: 꺼둔 모니터
+    type: http
+    target: https://example.com
+    enabled: false
