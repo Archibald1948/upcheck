@@ -1,0 +1,17 @@
+# 빌드 결과물
+/bin/
+/upcheck
+*.exe
+
+# 데이터베이스 (M2에서 생김)
+*.db
+*.db-wal
+*.db-shm
+
+# 로컬 설정 오버라이드
+configs/*.local.yaml
+
+# OS / 에디터
+.DS_Store
+.idea/
+.vscode/
