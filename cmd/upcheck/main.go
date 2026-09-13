@@ -25,6 +25,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Archibald1948/upcheck/internal/alert"
 	"github.com/Archibald1948/upcheck/internal/checker"
 	"github.com/Archibald1948/upcheck/internal/collector"
 	"github.com/Archibald1948/upcheck/internal/config"
@@ -118,11 +119,18 @@ func run() error {
 		return err
 	}
 
+	rules, dispatcher, err := alert.FromConfig(cfg.Alerts, log)
+	if err != nil {
+		return err
+	}
+
 	return runDaemon(ctx, st, ids, sched, monitors, log, daemonOpts{
 		quiet:      *quiet,
 		dumpGo:     *dumpGo,
 		dbPath:     *dbPath,
 		maintEvery: *maintEvery,
+		rules:      rules,
+		dispatcher: dispatcher,
 	})
 }
 
@@ -131,6 +139,8 @@ type daemonOpts struct {
 	dumpGo     bool
 	dbPath     string
 	maintEvery time.Duration
+	rules      alert.Rules
+	dispatcher *alert.Dispatcher
 }
 
 // ─────────────────────────── M0: 순차 ───────────────────────────
@@ -188,8 +198,29 @@ func runDaemon(
 	log *slog.Logger,
 	opts daemonOpts,
 ) error {
-	fmt.Printf("모니터 %d개 · 스케줄러 %s · DB %s · Ctrl+C 로 종료\n\n",
-		len(monitors), sched.Name(), opts.dbPath)
+	fmt.Printf("모니터 %d개 · 스케줄러 %s · DB %s\n%s\nCtrl+C 로 종료\n\n",
+		len(monitors), sched.Name(), opts.dbPath, alert.Describe(opts.rules, opts.dispatcher))
+
+	// 모니터 이름 → 주소. 알림 본문에 넣는다.
+	targets := make(map[string]string, len(monitors))
+	for _, m := range monitors {
+		targets[m.Name] = m.Target
+	}
+
+	// 알림 발송을 별도 goroutine 으로 띄운다 (스펙 7절 함정).
+	// 웹훅 서버가 느려도 체크 루프는 멈추면 안 된다.
+	dispatchDone := make(chan struct{})
+	go func() {
+		defer close(dispatchDone)
+		opts.dispatcher.Run(ctx)
+	}()
+
+	engine := alert.NewEngine(st, ids, opts.rules, opts.dispatcher, log)
+	// 진행 중이던 장애를 복원한다. 재시작할 때마다 같은 장애로
+	// 알림이 다시 가는 걸 막는다.
+	if err := engine.Restore(ctx); err != nil {
+		return err
+	}
 
 	start := time.Now()
 	results := sched.Run(ctx, monitors)
@@ -217,6 +248,9 @@ func runDaemon(
 	// 채널이 닫혔다는 뜻이고, 곧 스케줄러가 완전히 정리됐다는 뜻이다.
 	err := coll.Run(ctx, results, func(res checker.Result) {
 		tally.add(res)
+		// 상태 전이 판정. 알릴 게 있으면 dispatcher 큐로 들어간다.
+		engine.Observe(ctx, res, targets[res.Monitor])
+
 		if n := runtime.NumGoroutine(); n > peakGoroutines {
 			peakGoroutines = n
 		}
@@ -228,6 +262,13 @@ func runDaemon(
 		return err
 	}
 
+	// 여기서 순서가 중요하다.
+	// collector 가 반환했다 = 더 이상 결과가 없다 = engine 이 이벤트를 안 만든다.
+	// 그제서야 이벤트 채널을 닫아야 발송 중인 알림을 잃지 않는다.
+	// (보내는 쪽이 닫는다 — 스펙 5절 규칙 2번)
+	opts.dispatcher.Close()
+	<-dispatchDone
+
 	// 정리 잡이 마지막 롤업까지 끝내기를 기다린다.
 	<-maintDone
 
@@ -235,6 +276,8 @@ func runDaemon(
 	fmt.Printf("\n── 종료 (구동 %v) ──\n", shutdown.Round(time.Millisecond))
 	tally.print()
 	printStats(sched.Stats())
+
+	printAlertStats(engine.Stats(), opts.dispatcher)
 
 	cs := coll.Stats()
 	fmt.Printf("DB: 저장 %d행", cs.Written)
@@ -260,6 +303,18 @@ func runDaemon(
 
 	fmt.Printf("\n누적 현황을 보려면: upcheck -db %s -report\n", opts.dbPath)
 	return nil
+}
+
+func printAlertStats(es alert.Stats, d *alert.Dispatcher) {
+	ds := d.Stats()
+	if es.Sent == 0 && es.Suppressed == 0 && ds.Sent == 0 && ds.Failed == 0 {
+		return
+	}
+	fmt.Printf("알림: 판정 %d건 · 쿨다운 억제 %d건", es.Sent, es.Suppressed)
+	if d.Enabled() {
+		fmt.Printf(" · 발송 %d · 실패 %d · 큐넘침 %d", ds.Sent, ds.Failed, ds.Dropped)
+	}
+	fmt.Println()
 }
 
 // ─────────────────────────── 저장된 현황 출력 ───────────────────────────
@@ -301,6 +356,10 @@ func printSummary(ctx context.Context, st *store.Store) error {
 			dur(r.Latency24h.P50), dur(r.Latency24h.P95))
 	}
 
+	if err := printIncidents(ctx, st, now); err != nil {
+		return err
+	}
+
 	// 근사치가 섞였으면 알려준다. 숫자만 보여주고 말면 오해한다.
 	for _, r := range rows {
 		if r.Latency24h.Approx {
@@ -309,6 +368,32 @@ func printSummary(ctx context.Context, st *store.Store) error {
 			fmt.Println("  업타임 %는 개수 합이라 롤업 구간도 정확하다.")
 			break
 		}
+	}
+	return nil
+}
+
+// printIncidents 는 최근 장애 이력을 보여준다.
+func printIncidents(ctx context.Context, st *store.Store, now time.Time) error {
+	incidents, err := st.RecentIncidents(ctx, 10)
+	if err != nil {
+		return err
+	}
+	if len(incidents) == 0 {
+		return nil
+	}
+
+	fmt.Printf("\n최근 장애 %d건\n", len(incidents))
+	fmt.Println(strings.Repeat("─", 78))
+	for _, i := range incidents {
+		state := "해소"
+		if i.ResolvedAt == nil {
+			state = "진행중"
+		}
+		fmt.Printf("%-6s %-22s %s  (%v)  %s\n",
+			state, truncate(i.MonitorName, 22),
+			i.StartedAt.Local().Format("01-02 15:04:05"),
+			i.Duration(now).Round(time.Second),
+			truncate(i.Cause, 30))
 	}
 	return nil
 }
