@@ -53,10 +53,33 @@ func (m Monitor) IsEnabled() bool {
 	return m.Enabled == nil || *m.Enabled
 }
 
+// Alerts 는 알림 설정이다.
+type Alerts struct {
+	// FailureThreshold 는 연속 몇 번 실패해야 down 으로 확정할지다.
+	// 1로 두면 일시적인 네트워크 끊김에도 알림이 간다. 기본 3회.
+	FailureThreshold int `yaml:"failure_threshold"`
+
+	// SuccessThreshold 는 연속 몇 번 성공해야 up 으로 확정할지다.
+	SuccessThreshold int `yaml:"success_threshold"`
+
+	// Cooldown 은 같은 모니터에 다시 알림을 보내기까지의 최소 간격이다.
+	// 플래핑하는 엔드포인트에서 알림 폭탄을 막는 마지막 방어선이다.
+	//
+	// time.Duration 을 YAML 에서 "5m" 처럼 쓰려면 문자열로 받아야 한다.
+	// yaml.v3 는 Duration 을 모른다 — 나노초 정수로 해석해버린다.
+	Cooldown string `yaml:"cooldown"`
+
+	// 웹훅 주소. ${VAR} 로 환경변수를 참조할 수 있다.
+	// 실제 주소를 설정 파일에 적어 커밋하지 말 것.
+	Discord string `yaml:"discord_webhook"`
+	Slack   string `yaml:"slack_webhook"`
+}
+
 // Config 는 설정 파일 전체의 모양이다.
 type Config struct {
 	Workers  int       `yaml:"workers"`
 	Monitors []Monitor `yaml:"monitors"`
+	Alerts   Alerts    `yaml:"alerts"`
 }
 
 // 기본값들. Go에는 상수 그룹을 묶는 const ( ... ) 문법이 있다.
@@ -65,6 +88,10 @@ const (
 	defaultTimeoutMS      = 5000
 	defaultExpectedStatus = 200
 	defaultWorkers        = 8
+
+	defaultFailureThreshold = 3
+	defaultSuccessThreshold = 1
+	defaultCooldown         = 5 * time.Minute
 )
 
 // Load 는 path 의 YAML 파일을 읽어 Config 를 돌려준다.
@@ -102,6 +129,9 @@ func (c *Config) applyDefaultsAndValidate() error {
 	if c.Workers <= 0 {
 		c.Workers = defaultWorkers
 	}
+	if err := c.Alerts.applyDefaults(); err != nil {
+		return err
+	}
 	if len(c.Monitors) == 0 {
 		return fmt.Errorf("모니터가 하나도 없다")
 	}
@@ -134,6 +164,43 @@ func (c *Config) applyDefaultsAndValidate() error {
 		}
 	}
 	return nil
+}
+
+// applyDefaults 는 알림 설정의 빈 값을 채우고 웹훅 주소의 환경변수를 푼다.
+func (a *Alerts) applyDefaults() error {
+	if a.FailureThreshold <= 0 {
+		a.FailureThreshold = defaultFailureThreshold
+	}
+	if a.SuccessThreshold <= 0 {
+		a.SuccessThreshold = defaultSuccessThreshold
+	}
+	if a.Cooldown == "" {
+		a.Cooldown = defaultCooldown.String()
+	}
+	if _, err := a.CooldownDuration(); err != nil {
+		return fmt.Errorf("alerts.cooldown: %w", err)
+	}
+
+	// os.ExpandEnv 는 "${VAR}" 와 "$VAR" 를 환경변수 값으로 바꾼다.
+	// 없는 변수는 빈 문자열이 된다 — 그러면 그 채널은 그냥 꺼진 것으로 본다.
+	a.Discord = os.ExpandEnv(a.Discord)
+	a.Slack = os.ExpandEnv(a.Slack)
+	return nil
+}
+
+// CooldownDuration 은 문자열 쿨다운을 time.Duration 으로 바꾼다.
+func (a Alerts) CooldownDuration() (time.Duration, error) {
+	if a.Cooldown == "" {
+		return defaultCooldown, nil
+	}
+	d, err := time.ParseDuration(a.Cooldown)
+	if err != nil {
+		return 0, fmt.Errorf("%q 를 시간으로 해석할 수 없다 (예: 30s, 5m, 1h)", a.Cooldown)
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("쿨다운은 음수일 수 없다: %v", d)
+	}
+	return d, nil
 }
 
 // EnabledMonitors 는 켜져 있는 모니터만 추려서 돌려준다.
