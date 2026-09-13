@@ -21,12 +21,15 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/Archibald1948/upcheck/internal/checker"
+	"github.com/Archibald1948/upcheck/internal/collector"
 	"github.com/Archibald1948/upcheck/internal/config"
 	"github.com/Archibald1948/upcheck/internal/scheduler"
+	"github.com/Archibald1948/upcheck/internal/store"
 )
 
 func main() {
@@ -46,20 +49,35 @@ func run() error {
 		duration   = flag.Duration("duration", 0, "이 시간만큼 돌고 자동 종료 (0=무한)")
 		quiet      = flag.Bool("quiet", false, "개별 결과를 출력하지 않는다 (측정용)")
 		dumpGo     = flag.Bool("dump-goroutines", false, "종료 후 남은 goroutine 스택을 출력 (누수 추적)")
+		dbPath     = flag.String("db", "upcheck.db", "SQLite 파일 경로")
+		report     = flag.Bool("report", false, "체크하지 않고 저장된 현황만 출력")
+		maintEvery = flag.Duration("maintain-every", 10*time.Minute, "롤업·정리 잡 주기")
 	)
 	flag.Parse()
-
-	cfg, err := config.Load(*configPath)
-	if err != nil {
-		return err
-	}
-	monitors := cfg.EnabledMonitors()
 
 	// signal.NotifyContext 는 SIGINT/SIGTERM 을 받으면 자동으로 취소되는
 	// context 를 만들어준다. Ctrl+C 를 누르면 ctx.Done() 이 닫히고,
 	// 그 ctx 를 쓰는 HTTP 요청이 즉시 끊긴다.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	// -report 는 체크 없이 DB만 읽는다. 설정 파일도 필요 없다.
+	if *report {
+		st, err := store.Open(ctx, *dbPath, log)
+		if err != nil {
+			return err
+		}
+		defer st.Close()
+		return printSummary(ctx, st)
+	}
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		return err
+	}
+	monitors := cfg.EnabledMonitors()
 
 	// -duration 이 주어지면 그만큼 뒤에 스스로 취소된다.
 	// 자식 context 라서 Ctrl+C(부모 취소)도 여전히 먹는다.
@@ -78,8 +96,6 @@ func run() error {
 		return runOnce(ctx, c, monitors)
 	}
 
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-
 	var sched scheduler.Scheduler
 	switch *schedName {
 	case "pool":
@@ -90,7 +106,31 @@ func run() error {
 		return fmt.Errorf("알 수 없는 스케줄러 %q (pool 또는 ticker)", *schedName)
 	}
 
-	return runDaemon(ctx, sched, monitors, *quiet, *dumpGo)
+	st, err := store.Open(ctx, *dbPath, log)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	// 설정의 모니터를 DB에 반영하고 이름→id 맵을 받는다.
+	ids, err := st.SyncMonitors(ctx, monitors)
+	if err != nil {
+		return err
+	}
+
+	return runDaemon(ctx, st, ids, sched, monitors, log, daemonOpts{
+		quiet:      *quiet,
+		dumpGo:     *dumpGo,
+		dbPath:     *dbPath,
+		maintEvery: *maintEvery,
+	})
+}
+
+type daemonOpts struct {
+	quiet      bool
+	dumpGo     bool
+	dbPath     string
+	maintEvery time.Duration
 }
 
 // ─────────────────────────── M0: 순차 ───────────────────────────
@@ -135,15 +175,34 @@ func runOnce(ctx context.Context, c *checker.Checker, monitors []config.Monitor)
 
 // ─────────────────────────── M1: 스케줄러 ───────────────────────────
 
-// runDaemon 은 스케줄러를 띄우고 결과를 수집한다.
+// runDaemon 은 스케줄러를 띄우고 결과를 수집해 DB에 쌓는다.
 //
-// 스펙 5절 다이어그램의 collector 자리다.
-// M2에서 여기에 DB 저장과 상태 전이 판정이 붙는다.
-func runDaemon(ctx context.Context, sched scheduler.Scheduler, monitors []config.Monitor, quiet, dumpGoroutines bool) error {
-	fmt.Printf("모니터 %d개 · 스케줄러 %s · Ctrl+C 로 종료\n\n", len(monitors), sched.Name())
+//	scheduler → results → collector → SQLite
+//	                  maintenance goroutine → 롤업 · 정리
+func runDaemon(
+	ctx context.Context,
+	st *store.Store,
+	ids map[string]int64,
+	sched scheduler.Scheduler,
+	monitors []config.Monitor,
+	log *slog.Logger,
+	opts daemonOpts,
+) error {
+	fmt.Printf("모니터 %d개 · 스케줄러 %s · DB %s · Ctrl+C 로 종료\n\n",
+		len(monitors), sched.Name(), opts.dbPath)
 
 	start := time.Now()
 	results := sched.Run(ctx, monitors)
+
+	// 롤업·정리 잡을 별도 goroutine 으로 띄운다.
+	//
+	// 알림과 마찬가지로, 정리 잡이 느려도 모니터링은 계속돼야 한다.
+	// ctx 가 취소되면 스스로 마지막 롤업을 한 번 돌리고 끝난다.
+	maintDone := make(chan struct{})
+	go func() {
+		defer close(maintDone)
+		st.RunMaintenance(ctx, opts.maintEvery, store.DefaultRetention)
+	}()
 
 	tally := newTally()
 
@@ -152,36 +211,122 @@ func runDaemon(ctx context.Context, sched scheduler.Scheduler, monitors []config
 	// pool 은 워커 수 + 상수, ticker 는 모니터 수에 비례한다.
 	peakGoroutines := runtime.NumGoroutine()
 
-	// range 로 채널을 읽으면 채널이 닫힐 때까지 계속 받는다.
-	// 스케줄러는 ctx 가 취소되고 내부 goroutine 이 전부 정리된 뒤에 닫으므로,
-	// 이 루프가 빠져나왔다는 건 곧 "종료가 깔끔하게 끝났다"는 뜻이다.
-	for res := range results {
+	coll := collector.New(st, ids, log)
+
+	// collector 가 results 를 끝까지 읽는다. 이 함수가 반환했다는 건
+	// 채널이 닫혔다는 뜻이고, 곧 스케줄러가 완전히 정리됐다는 뜻이다.
+	err := coll.Run(ctx, results, func(res checker.Result) {
 		tally.add(res)
 		if n := runtime.NumGoroutine(); n > peakGoroutines {
 			peakGoroutines = n
 		}
-		if !quiet {
+		if !opts.quiet {
 			printResult(res)
 		}
+	})
+	if err != nil {
+		return err
 	}
+
+	// 정리 잡이 마지막 롤업까지 끝내기를 기다린다.
+	<-maintDone
 
 	shutdown := time.Since(start)
 	fmt.Printf("\n── 종료 (구동 %v) ──\n", shutdown.Round(time.Millisecond))
 	tally.print()
 	printStats(sched.Stats())
 
+	cs := coll.Stats()
+	fmt.Printf("DB: 저장 %d행", cs.Written)
+	if cs.Failed > 0 {
+		fmt.Printf(" · 저장실패 %d행", cs.Failed)
+	}
+	if cs.Dropped > 0 {
+		fmt.Printf(" · 버림 %d행", cs.Dropped)
+	}
+	fmt.Println()
+
 	// 종료 후 남은 goroutine 수. 스케줄러가 뒷정리를 제대로 했다면
 	// 시작 시점 수준으로 돌아와 있어야 한다. (스펙 6절 완료 기준 1번)
 	fmt.Printf("goroutine: 최대 %d개 · 종료 후 %d개\n", peakGoroutines, runtime.NumGoroutine())
 
-	if dumpGoroutines {
+	if opts.dumpGo {
 		fmt.Println("\n=== 남은 goroutine 스택 ===")
 		// pprof.Lookup("goroutine") 은 현재 살아 있는 모든 goroutine 을 준다.
 		// 인자 1 은 사람이 읽을 수 있는 형식으로 출력하라는 뜻이다.
 		// M6에서 /debug/pprof 로 이걸 HTTP 로 노출한다.
 		_ = pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
 	}
+
+	fmt.Printf("\n누적 현황을 보려면: upcheck -db %s -report\n", opts.dbPath)
 	return nil
+}
+
+// ─────────────────────────── 저장된 현황 출력 ───────────────────────────
+
+// printSummary 는 DB에 쌓인 집계를 보여준다. (-report)
+func printSummary(ctx context.Context, st *store.Store) error {
+	now := time.Now()
+	rows, err := st.Summary(ctx, now)
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		fmt.Println("등록된 모니터가 없다. 먼저 upcheck 를 한 번 구동하자.")
+		return nil
+	}
+
+	total, err := st.CountChecks(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("모니터 %d개 · 보관 중인 원본 체크 %d행 · %s 기준\n\n",
+		len(rows), total, now.Format("2006-01-02 15:04:05"))
+
+	fmt.Printf("%-4s %-22s %9s %9s %9s %9s %9s\n",
+		"상태", "모니터", "24h", "7d", "30d", "p50", "p95")
+	fmt.Println(strings.Repeat("─", 78))
+
+	for _, r := range rows {
+		state := "  ? "
+		if r.LastCheck != nil {
+			state = " UP "
+			if !r.Up() {
+				state = "DOWN"
+			}
+		}
+		fmt.Printf("%-4s %-22s %8s %9s %9s %9s %9s\n",
+			state, truncate(r.Name, 22),
+			pct(r.Uptime24h), pct(r.Uptime7d), pct(r.Uptime30d),
+			dur(r.Latency24h.P50), dur(r.Latency24h.P95))
+	}
+
+	// 근사치가 섞였으면 알려준다. 숫자만 보여주고 말면 오해한다.
+	for _, r := range rows {
+		if r.Latency24h.Approx {
+			fmt.Println("\n※ p50/p95 중 일부는 시간별 롤업에서 근사한 값이다.")
+			fmt.Println("  백분위수는 합칠 수 없어서, 원본이 정리된 구간은 정확하지 않다.")
+			fmt.Println("  업타임 %는 개수 합이라 롤업 구간도 정확하다.")
+			break
+		}
+	}
+	return nil
+}
+
+// pct 는 업타임을 표시용 문자열로 바꾼다. 표본이 없으면 "-".
+func pct(u store.Uptime) string {
+	if u.Total == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.2f%%", u.Percent())
+}
+
+// dur 은 응답시간을 표시용 문자열로 바꾼다.
+func dur(d time.Duration) string {
+	if d == 0 {
+		return "-"
+	}
+	return d.Round(time.Millisecond).String()
 }
 
 // ─────────────────────────── 집계 ───────────────────────────
