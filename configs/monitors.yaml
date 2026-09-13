@@ -1,7 +1,30 @@
 # upcheck 설정 파일
 #
-# workers: M1(워커풀)에서 사용할 동시 실행 개수. M0에서는 무시된다.
+# workers: 동시에 돌릴 워커 수. 동시 HTTP 요청의 상한이다.
 workers: 8
+
+# 알림 설정 (M3)
+alerts:
+  # 연속 몇 번 실패해야 down 으로 확정할지. 1로 두면 일시적인
+  # 네트워크 끊김에도 알림이 간다.
+  failure_threshold: 3
+
+  # 연속 몇 번 성공해야 up 으로 확정할지.
+  success_threshold: 1
+
+  # 같은 모니터에 다시 알림을 보내기까지의 최소 간격.
+  # 플래핑하는 엔드포인트에서 알림 폭탄을 막는 마지막 방어선이다.
+  cooldown: 5m
+
+  # 웹훅 주소. ${VAR} 로 환경변수를 참조한다.
+  #
+  # 실제 주소를 여기 적어서 커밋하지 말 것 — 웹훅 URL 자체가 인증 수단이라
+  # 유출되면 누구나 그 채널에 글을 쓸 수 있다.
+  # 환경변수를 지정하지 않으면 그 채널은 그냥 꺼진 것으로 본다.
+  # 알림을 안 보내도 판정과 장애 이력 기록은 그대로 돌아간다.
+  #
+  # discord_webhook: ${UPCHECK_DISCORD_WEBHOOK}
+  # slack_webhook: ${UPCHECK_SLACK_WEBHOOK}
 
 monitors:
   - name: Google
