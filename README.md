@@ -14,7 +14,7 @@
 - [x] **M1** — 중앙 스케줄러 + 워커풀 · [설계 비교](docs/08-M1-동시성.md)
 - [x] **M2** — SQLite 저장 & 집계 · [기록](docs/10-M2-저장과집계.md)
 - [x] **M3** — 알림 (플래핑 방지, 쿨다운) · [기록](docs/11-M3-알림.md)
-- [ ] **M4** — 체크 타입 확장 (tcp / tls / dns)
+- [x] **M4** — 체크 타입 확장 (tcp / tls / dns) · [기록](docs/12-M4-체크타입.md)
 - [ ] **M5** — HTTP API + Next.js 상태 페이지
 - [ ] **M6** — 운영 준비 (graceful shutdown, metrics, Docker)
 
@@ -116,17 +116,37 @@ gofmt -l .
 ## 설정
 
 ```yaml
-workers: 8              # 동시에 돌릴 워커 수. 동시 HTTP 요청의 상한이다.
+workers: 8              # 동시에 돌릴 워커 수. 동시 요청의 상한이다.
 
 monitors:
+  # http — 상태 코드 · 본문 키워드
   - name: Google        # 필수
-    type: http          # 기본값 http (M4에서 tcp/tls/dns 추가)
-    target: https://www.google.com   # 필수
+    type: http          # 기본값 http
+    target: https://www.google.com   # 스킴 필수
     interval_sec: 60    # 기본값 60
     timeout_ms: 5000    # 기본값 5000
     expected_status: 200 # 기본값 200
     keyword: 정상        # 선택 — 응답 본문에 이 문자열이 있어야 UP
     enabled: true       # 기본값 true
+
+  # tcp — 포트가 열려 있는지만 확인 (DB, 큐, SMTP 등)
+  - name: PostgreSQL
+    type: tcp
+    target: db.example:5432   # 포트 필수
+
+  # tls — 인증서 만료까지 남은 일수
+  - name: 인증서
+    type: tls
+    target: example.com       # 포트 생략 시 443
+    cert_warn_days: 30        # 기본값 30. 이하로 남으면 경고
+
+  # dns — 레코드가 기대값으로 해석되는지
+  - name: DNS 레코드
+    type: dns
+    target: example.com       # 호스트 이름만
+    record: A                 # A, AAAA, CNAME, TXT, MX, NS (기본 A)
+    expect: [1.2.3.4]         # 하나라도 나오면 정상. 비우면 해석만 확인
+    resolver: 8.8.8.8:53      # 선택 — 비우면 시스템 기본값
 
 alerts:
   failure_threshold: 3  # 연속 3회 실패해야 down 확정 (플래핑 1차 방어)
@@ -146,6 +166,26 @@ go run ./cmd/upcheck
 
 웹훅을 지정하지 않아도 판정과 장애 이력 기록은 그대로 돌아간다.
 
+### 체크 타입
+
+| 타입 | 검사 내용 | target 형식 |
+|------|-----------|-------------|
+| `http` | 상태 코드 · 본문 키워드 · 리다이렉트 | `https://example.com/health` |
+| `tcp` | 포트 연결 가능 여부 | `db.example:5432` |
+| `tls` | 인증서 만료까지 남은 일수 | `example.com` (기본 443) |
+| `dns` | 레코드가 기대값으로 해석되는지 | `example.com` |
+
+```
+[UP  ] http  Google              270ms  200
+[UP  ] tcp   Google DNS (TCP)     67ms  연결됨
+[UP  ] tls   GitHub 인증서          17ms  만료 D-77 (2026-11-30)
+[UP  ] dns   Google DNS 레코드       1ms  A 8.8.4.4 8.8.8.8
+```
+
+인증서 만료 임박은 **경고**이지 실패가 아니다. 30일 뒤에 만료돼도 서비스는
+지금 멀쩡히 돌고 있어서, 실패로 세면 업타임이 망가지고 가짜 장애 알림이 간다.
+`-report` 에서 따로 모아 보여준다. 근거는 [docs/12-M4-체크타입.md](docs/12-M4-체크타입.md).
+
 ### 알림 규칙
 
 | 관문 | 하는 일 |
@@ -164,7 +204,7 @@ go run ./cmd/upcheck
 cmd/upcheck/        본체
 cmd/slowserver/     테스트용 느린 서버 (동시성 측정 포함)
 internal/config/    YAML 파싱 · 기본값 · 검증
-internal/checker/   HTTP 체크 한 번
+internal/checker/   체크 타입별 구현 (http / tcp / tls / dns)
 internal/scheduler/ 스케줄러 두 구현 (pool / ticker)
 internal/store/     SQLite 저장 · 롤업 · 집계 · 장애 이력
 internal/collector/ 결과를 모아 배치로 저장
