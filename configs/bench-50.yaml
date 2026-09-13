@@ -1,0 +1,256 @@
+# 벤치마크용 설정 — 로컬 slowserver 를 향한 모니터 50개
+# 생성: scripts/gen-bench-config.sh
+#
+# 먼저 다른 터미널에서: go run ./cmd/slowserver -delay 200ms
+workers: 8
+monitors:
+  - name: bench-01
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-02
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-03
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-04
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-05
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-06
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-07
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-08
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-09
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-10
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-11
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-12
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-13
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-14
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-15
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-16
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-17
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-18
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-19
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-20
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-21
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-22
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-23
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-24
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-25
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-26
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-27
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-28
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-29
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-30
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-31
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-32
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-33
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-34
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-35
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-36
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-37
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-38
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-39
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-40
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-41
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-42
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-43
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-44
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-45
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-46
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-47
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-48
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-49
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
+  - name: bench-50
+    type: http
+    target: http://localhost:8080/slow
+    interval_sec: 10
+    timeout_ms: 5000
