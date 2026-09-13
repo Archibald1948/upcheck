@@ -11,7 +11,7 @@
 ## 진행 상황
 
 - [x] **M0** — 순차 체크 · [기록](docs/05-M0-순차-체크.md)
-- [ ] **M1** — 중앙 스케줄러 + 워커풀
+- [x] **M1** — 중앙 스케줄러 + 워커풀 · [설계 비교](docs/08-M1-동시성.md)
 - [ ] **M2** — SQLite 저장 & 집계
 - [ ] **M3** — 알림 (플래핑 방지, 쿨다운)
 - [ ] **M4** — 체크 타입 확장 (tcp / tls / dns)
@@ -29,21 +29,46 @@ brew install go
 ## 실행
 
 ```bash
-go run ./cmd/upcheck                              # configs/monitors.yaml 사용
-go run ./cmd/upcheck -config configs/bench-50.yaml
+go run ./cmd/upcheck                    # 스케줄러 구동 (Ctrl+C 로 종료)
+go run ./cmd/upcheck -once              # 순차로 한 번만 체크 (M0 동작)
+go run ./cmd/upcheck -scheduler ticker  # 비교용 구현으로 구동
 ```
 
-### 벤치마크
+주요 플래그:
 
-순차 체크가 얼마나 느린지 직접 재본다. 터미널 두 개가 필요하다.
+| 플래그 | 뜻 |
+|--------|-----|
+| `-config` | 설정 파일 경로 (기본 `configs/monitors.yaml`) |
+| `-once` | 순차적으로 한 번만 체크하고 종료 |
+| `-scheduler` | `pool`(기본) 또는 `ticker` |
+| `-duration` | 이 시간만큼 돌고 자동 종료 (측정용) |
+| `-quiet` | 개별 결과를 출력하지 않음 |
+| `-dump-goroutines` | 종료 후 남은 goroutine 스택 출력 |
+
+### 스케줄러 두 방식 비교
+
+스펙 M1이 요구한 설계 결정을 **측정으로** 정리했다. 터미널 두 개가 필요하다.
 
 ```bash
-go run ./cmd/slowserver -delay 200ms              # 터미널 1
-go run ./cmd/upcheck -config configs/bench-50.yaml # 터미널 2
+go run ./cmd/slowserver -delay 200ms                                    # 터미널 1
+
+go run ./cmd/upcheck -config configs/bench-50.yaml -duration 11s -quiet  # 터미널 2
+curl -s localhost:8080/stats
 ```
 
-현재(M0): 모니터 50개 × 200ms = **10.085초**. `interval_sec: 10` 을 못 지킨다.
-자세한 분석은 [docs/05-M0-순차-체크.md](docs/05-M0-순차-체크.md).
+모니터 50개 · 주기 5초 · 응답 200ms · workers 8 기준:
+
+| | pool | ticker |
+|---|---|---|
+| 서버가 관측한 최대 동시 요청 | **3** | **50** |
+| 과부하 시 최대 goroutine | 29 | 154 |
+| 과부하를 보고하는가 | 그렇다 | 아니다 (조용히 버림) |
+
+같은 양의 일을 하면서 상대 서버가 받는 순간 부하는 17분의 1이다.
+근거와 구현 과정은 [docs/08-M1-동시성.md](docs/08-M1-동시성.md).
+
+M0의 순차 측정(모니터 50개 = **10.085초**)은
+[docs/05-M0-순차-체크.md](docs/05-M0-순차-체크.md).
 
 ## 개발
 
@@ -57,7 +82,7 @@ gofmt -l .
 ## 설정
 
 ```yaml
-workers: 8              # 동시 실행 워커 수 (M1부터 사용)
+workers: 8              # 동시에 돌릴 워커 수. 동시 HTTP 요청의 상한이다.
 
 monitors:
   - name: Google        # 필수
@@ -74,9 +99,10 @@ monitors:
 
 ```
 cmd/upcheck/        본체
-cmd/slowserver/     테스트용 느린 서버
+cmd/slowserver/     테스트용 느린 서버 (동시성 측정 포함)
 internal/config/    YAML 파싱 · 기본값 · 검증
 internal/checker/   HTTP 체크 한 번
+internal/scheduler/ 스케줄러 두 구현 (pool / ticker)
 configs/            설정 파일
 docs/               Go 학습 노트
 ```
