@@ -171,9 +171,11 @@ func (c *Collector) toRow(res checker.Result) (store.CheckRow, error) {
 
 	row := store.CheckRow{
 		MonitorID:  id,
+		Type:       res.Type,
 		CheckedAt:  res.CheckedAt,
 		OK:         res.OK,
 		StatusCode: res.StatusCode,
+		Warning:    res.Warning,
 		// Duration 을 밀리초 정수로 접는다. 마이크로초 이하는 버린다 —
 		// 네트워크 응답시간에서 그 정밀도는 의미가 없고, 저장 공간만 먹는다.
 		LatencyMS: res.Latency.Milliseconds(),
