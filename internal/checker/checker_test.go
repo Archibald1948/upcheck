@@ -11,21 +11,85 @@ import (
 	"github.com/Archibald1948/upcheck/internal/config"
 )
 
-// httptest.NewServer 는 진짜 포트를 열어 로컬 HTTP 서버를 띄운다.
-// 외부 네트워크에 의존하지 않으므로 테스트가 빠르고 안정적이다.
+// httpMonitor 는 http 타입 모니터를 만든다.
+// Type 을 빠뜨리면 Checker 가 Prober 를 못 찾으므로 반드시 채운다.
+func httpMonitor(name, target string) config.Monitor {
+	return config.Monitor{
+		Name: name, Type: config.TypeHTTP, Target: target,
+		TimeoutMS: 2000, ExpectedStatus: 200,
+	}
+}
 
-func TestCheckOK(t *testing.T) {
+// ─────────────── 디스패치 ───────────────
+
+func TestCheckerSupportsAllTypes(t *testing.T) {
+	c := New()
+	defer c.Close()
+
+	want := []string{config.TypeHTTP, config.TypeTCP, config.TypeTLS, config.TypeDNS}
+	got := c.Types()
+	if len(got) != len(want) {
+		t.Fatalf("지원 타입 %v, 기대값 %v", got, want)
+	}
+	for _, w := range want {
+		if !contains(got, w) {
+			t.Errorf("%q 타입이 등록되지 않았다", w)
+		}
+	}
+}
+
+func TestCheckerRejectsUnknownType(t *testing.T) {
+	c := New()
+	defer c.Close()
+
+	res := c.Check(context.Background(), config.Monitor{
+		Name: "x", Type: "gopher", Target: "x", TimeoutMS: 1000,
+	})
+	if res.OK {
+		t.Fatal("모르는 타입인데 OK 로 판정됐다")
+	}
+	if res.Err == nil {
+		t.Fatal("Err 가 nil 이다")
+	}
+}
+
+// TestCheckFillsCommonFields 는 Checker 가 공통 필드를 채우는지 본다.
+// Prober 구현체는 이것들을 신경 쓰지 않아도 된다.
+func TestCheckFillsCommonFields(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	c := New()
+	defer c.Close()
+
+	res := c.Check(context.Background(), httpMonitor("공통필드", srv.URL))
+
+	if res.Monitor != "공통필드" {
+		t.Errorf("Monitor = %q", res.Monitor)
+	}
+	if res.Type != config.TypeHTTP {
+		t.Errorf("Type = %q", res.Type)
+	}
+	// 시각은 UTC 로 저장돼야 한다 (스펙 7절 함정)
+	if _, offset := res.CheckedAt.Zone(); offset != 0 {
+		t.Errorf("CheckedAt 이 UTC 가 아니다: %v", res.CheckedAt)
+	}
+}
+
+// ─────────────── http ───────────────
+
+func TestHTTPOK(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("hello upcheck"))
 	}))
-	defer srv.Close() // 테스트 끝나면 서버를 닫는다
+	defer srv.Close()
 
-	m := config.Monitor{
-		Name: "ok", Target: srv.URL,
-		TimeoutMS: 2000, ExpectedStatus: 200,
-	}
+	c := New()
+	defer c.Close()
 
-	res := New().Check(context.Background(), m)
+	res := c.Check(context.Background(), httpMonitor("ok", srv.URL))
 	if !res.OK {
 		t.Fatalf("OK 를 기대했는데 실패: %v", res.Err)
 	}
@@ -35,22 +99,18 @@ func TestCheckOK(t *testing.T) {
 	if res.Latency <= 0 {
 		t.Error("Latency 가 측정되지 않았다")
 	}
-	// 시각은 UTC 로 저장돼야 한다 (스펙 7절 함정)
-	if _, offset := res.CheckedAt.Zone(); offset != 0 {
-		t.Errorf("CheckedAt 이 UTC 가 아니다: %v", res.CheckedAt)
-	}
 }
 
-func TestCheckUnexpectedStatus(t *testing.T) {
+func TestHTTPUnexpectedStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer srv.Close()
 
-	res := New().Check(context.Background(), config.Monitor{
-		Name: "503", Target: srv.URL, TimeoutMS: 2000, ExpectedStatus: 200,
-	})
+	c := New()
+	defer c.Close()
 
+	res := c.Check(context.Background(), httpMonitor("503", srv.URL))
 	if res.OK {
 		t.Fatal("503 인데 OK 로 판정됐다")
 	}
@@ -62,34 +122,34 @@ func TestCheckUnexpectedStatus(t *testing.T) {
 	}
 }
 
-func TestCheckKeyword(t *testing.T) {
+func TestHTTPKeyword(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("<html><body>서비스 정상</body></html>"))
 	}))
 	defer srv.Close()
 
 	c := New()
-	base := config.Monitor{Target: srv.URL, TimeoutMS: 2000, ExpectedStatus: 200}
+	defer c.Close()
 
 	t.Run("키워드 있음", func(t *testing.T) {
-		m := base
-		m.Name, m.Keyword = "found", "서비스 정상"
+		m := httpMonitor("found", srv.URL)
+		m.Keyword = "서비스 정상"
 		if res := c.Check(context.Background(), m); !res.OK {
 			t.Errorf("키워드가 있는데 실패: %v", res.Err)
 		}
 	})
 
 	t.Run("키워드 없음", func(t *testing.T) {
-		m := base
-		m.Name, m.Keyword = "missing", "이런문구는없다"
+		m := httpMonitor("missing", srv.URL)
+		m.Keyword = "이런문구는없다"
 		if res := c.Check(context.Background(), m); res.OK {
 			t.Error("키워드가 없는데 OK 로 판정됐다")
 		}
 	})
 }
 
-// TestCheckTimeout 은 서버가 느릴 때 context 타임아웃이 도는지 확인한다.
-func TestCheckTimeout(t *testing.T) {
+// TestHTTPTimeout 은 서버가 느릴 때 context 타임아웃이 도는지 확인한다.
+func TestHTTPTimeout(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-time.After(2 * time.Second):
@@ -98,16 +158,19 @@ func TestCheckTimeout(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	c := New()
+	defer c.Close()
+
+	m := httpMonitor("slow", srv.URL)
+	m.TimeoutMS = 200
+
 	start := time.Now()
-	res := New().Check(context.Background(), config.Monitor{
-		Name: "slow", Target: srv.URL, TimeoutMS: 200, ExpectedStatus: 200,
-	})
+	res := c.Check(context.Background(), m)
 	elapsed := time.Since(start)
 
 	if res.OK {
 		t.Fatal("타임아웃이 나야 하는데 OK 로 판정됐다")
 	}
-	// 200ms 타임아웃인데 2초를 기다렸다면 타임아웃이 안 걸린 것이다
 	if elapsed > time.Second {
 		t.Errorf("타임아웃이 동작하지 않았다: %v 소요", elapsed)
 	}
@@ -116,9 +179,9 @@ func TestCheckTimeout(t *testing.T) {
 	}
 }
 
-// TestCheckCancelledContext 는 부모 context 취소(= Ctrl+C)가
+// TestHTTPCancelledContext 는 부모 context 취소(= Ctrl+C)가
 // 진행 중인 요청을 즉시 끊는지 확인한다. M6의 graceful shutdown 기반이다.
-func TestCheckCancelledContext(t *testing.T) {
+func TestHTTPCancelledContext(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-time.After(3 * time.Second):
@@ -127,15 +190,18 @@ func TestCheckCancelledContext(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	c := New()
+	defer c.Close()
 
+	ctx, cancel := context.WithCancel(context.Background())
 	// 50ms 뒤에 취소한다. time.AfterFunc 는 별도 goroutine 에서 함수를 부른다.
 	time.AfterFunc(50*time.Millisecond, cancel)
 
+	m := httpMonitor("cancel", srv.URL)
+	m.TimeoutMS = 5000
+
 	start := time.Now()
-	res := New().Check(ctx, config.Monitor{
-		Name: "cancel", Target: srv.URL, TimeoutMS: 5000, ExpectedStatus: 200,
-	})
+	res := c.Check(ctx, m)
 	elapsed := time.Since(start)
 
 	if res.OK {
@@ -150,10 +216,11 @@ func TestCheckCancelledContext(t *testing.T) {
 	}
 }
 
-func TestCheckBadURL(t *testing.T) {
-	res := New().Check(context.Background(), config.Monitor{
-		Name: "bad", Target: "://잘못된주소", TimeoutMS: 1000, ExpectedStatus: 200,
-	})
+func TestHTTPBadURL(t *testing.T) {
+	c := New()
+	defer c.Close()
+
+	res := c.Check(context.Background(), httpMonitor("bad", "://잘못된주소"))
 	if res.OK {
 		t.Fatal("잘못된 URL 인데 OK 로 판정됐다")
 	}
@@ -162,21 +229,28 @@ func TestCheckBadURL(t *testing.T) {
 	}
 }
 
-// TestCheckerReusesClient 는 Checker 가 http.Client 를 재사용하는지 확인한다.
-// (스펙 7절 함정 1번 — 매 체크마다 클라이언트를 새로 만들면 안 된다)
-func TestCheckerReusesClient(t *testing.T) {
-	c := New()
-	if c.client == nil {
+// TestHTTPReusesClient 는 스펙 7절 함정 1번과 3번을 고정한다.
+func TestHTTPReusesClient(t *testing.T) {
+	p := newHTTPProber()
+	if p.client == nil {
 		t.Fatal("client 가 nil 이다")
 	}
 	// Client.Timeout 은 비어 있어야 한다. context 로 타임아웃을 걸기 때문이다.
-	// (스펙 7절 함정 3번)
-	if c.client.Timeout != 0 {
-		t.Errorf("Client.Timeout = %v, 0 이어야 한다 (context 로 제어)", c.client.Timeout)
+	if p.client.Timeout != 0 {
+		t.Errorf("Client.Timeout = %v, 0 이어야 한다 (context 로 제어)", p.client.Timeout)
+	}
+	// Checker 를 두 번 Check 해도 같은 클라이언트를 쓴다
+	c := New()
+	defer c.Close()
+	first := c.probers[config.TypeHTTP]
+	second := c.probers[config.TypeHTTP]
+	if first != second {
+		t.Error("Prober 가 매번 새로 만들어진다")
 	}
 }
 
-// TestClassifyErr 은 에러 분류 로직만 따로 본다.
+// ─────────────── 공통 ───────────────
+
 func TestClassifyErr(t *testing.T) {
 	orig := errors.New("원본 에러")
 
@@ -202,4 +276,13 @@ func TestClassifyErr(t *testing.T) {
 			t.Errorf("got %v", got)
 		}
 	})
+}
+
+func contains(list []string, want string) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
