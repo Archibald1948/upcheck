@@ -6,7 +6,10 @@ package config
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -27,6 +30,19 @@ type Monitor struct {
 	TimeoutMS      int    `yaml:"timeout_ms"`
 	ExpectedStatus int    `yaml:"expected_status"`
 	Keyword        string `yaml:"keyword"`
+
+	// ── tls 전용 ──
+	// 인증서 만료가 이 일수 이하로 남으면 경고한다. 기본 30일.
+	CertWarnDays int `yaml:"cert_warn_days"`
+
+	// ── dns 전용 ──
+	// Record 는 조회할 레코드 종류다 (A, AAAA, CNAME, TXT, MX, NS). 기본 A.
+	Record string `yaml:"record"`
+	// Expect 는 기대하는 응답 값들이다. 비어 있으면 "해석만 되면 정상"으로 본다.
+	// 여러 개를 적으면 그중 하나라도 나오면 정상이다.
+	Expect []string `yaml:"expect"`
+	// Resolver 는 쓸 DNS 서버다 (예: "8.8.8.8:53"). 비우면 시스템 기본값.
+	Resolver string `yaml:"resolver"`
 
 	// Enabled 만 *bool(bool 포인터)인 이유:
 	// Go의 bool 제로값은 false다. 그냥 bool로 두면
@@ -88,6 +104,8 @@ const (
 	defaultTimeoutMS      = 5000
 	defaultExpectedStatus = 200
 	defaultWorkers        = 8
+	defaultCertWarnDays   = 30
+	defaultDNSRecord      = "A"
 
 	defaultFailureThreshold = 3
 	defaultSuccessThreshold = 1
@@ -148,10 +166,7 @@ func (c *Config) applyDefaultsAndValidate() error {
 			return fmt.Errorf("%s: target 이 비어 있다", m.Name)
 		}
 		if m.Type == "" {
-			m.Type = "http" // M4에서 tcp/tls/dns 가 추가된다
-		}
-		if m.Type != "http" {
-			return fmt.Errorf("%s: 아직 지원하지 않는 타입 %q", m.Name, m.Type)
+			m.Type = TypeHTTP
 		}
 		if m.IntervalSec <= 0 {
 			m.IntervalSec = defaultIntervalSec
@@ -159,11 +174,120 @@ func (c *Config) applyDefaultsAndValidate() error {
 		if m.TimeoutMS <= 0 {
 			m.TimeoutMS = defaultTimeoutMS
 		}
-		if m.ExpectedStatus == 0 {
-			m.ExpectedStatus = defaultExpectedStatus
+
+		// 타입마다 필요한 필드와 target 모양이 다르다.
+		if err := m.applyTypeDefaults(); err != nil {
+			return fmt.Errorf("%s: %w", m.Name, err)
 		}
 	}
 	return nil
+}
+
+// 지원하는 체크 타입.
+const (
+	TypeHTTP = "http"
+	TypeTCP  = "tcp"
+	TypeTLS  = "tls"
+	TypeDNS  = "dns"
+)
+
+// dnsRecordTypes 는 지원하는 DNS 레코드 종류다.
+//
+// map[string]struct{} 는 '집합'이다. struct{} 는 크기가 0이라
+// 값에 메모리를 쓰지 않는다.
+var dnsRecordTypes = map[string]struct{}{
+	"A": {}, "AAAA": {}, "CNAME": {}, "TXT": {}, "MX": {}, "NS": {},
+}
+
+// applyTypeDefaults 는 타입별 기본값을 채우고 target 모양을 검증한다.
+//
+// 잘못된 설정은 첫 체크가 실패할 때가 아니라 여기서 걸러야 한다.
+// 오타 하나 때문에 한밤중에 가짜 장애 알림을 받으면 곤란하다.
+func (m *Monitor) applyTypeDefaults() error {
+	switch m.Type {
+	case TypeHTTP:
+		if m.ExpectedStatus == 0 {
+			m.ExpectedStatus = defaultExpectedStatus
+		}
+		u, err := url.Parse(m.Target)
+		if err != nil {
+			return fmt.Errorf("target 을 URL 로 해석할 수 없다: %w", err)
+		}
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return fmt.Errorf("http 타입의 target 은 http(s):// 로 시작해야 한다 (%q)", m.Target)
+		}
+		if u.Host == "" {
+			return fmt.Errorf("target 에 호스트가 없다 (%q)", m.Target)
+		}
+
+	case TypeTCP:
+		// tcp 는 포트를 반드시 적어야 한다. 기본 포트를 짐작할 근거가 없다.
+		if _, _, err := net.SplitHostPort(m.Target); err != nil {
+			return fmt.Errorf("tcp 타입의 target 은 host:port 여야 한다 (%q)", m.Target)
+		}
+
+	case TypeTLS:
+		// tls 는 포트를 생략하면 443 으로 본다.
+		if m.CertWarnDays <= 0 {
+			m.CertWarnDays = defaultCertWarnDays
+		}
+		host, err := normalizeTLSTarget(m.Target)
+		if err != nil {
+			return err
+		}
+		m.Target = host
+
+	case TypeDNS:
+		if m.Record == "" {
+			m.Record = defaultDNSRecord
+		}
+		m.Record = strings.ToUpper(m.Record)
+		if _, ok := dnsRecordTypes[m.Record]; !ok {
+			return fmt.Errorf("지원하지 않는 레코드 종류 %q (A, AAAA, CNAME, TXT, MX, NS)", m.Record)
+		}
+		if strings.ContainsAny(m.Target, "/:") {
+			return fmt.Errorf("dns 타입의 target 은 호스트 이름이어야 한다 (%q)", m.Target)
+		}
+		if m.Resolver != "" {
+			if _, _, err := net.SplitHostPort(m.Resolver); err != nil {
+				return fmt.Errorf("resolver 는 host:port 여야 한다 (%q)", m.Resolver)
+			}
+		}
+
+	default:
+		return fmt.Errorf("알 수 없는 타입 %q (http, tcp, tls, dns)", m.Type)
+	}
+	return nil
+}
+
+// normalizeTLSTarget 은 tls target 을 host:port 로 맞춘다.
+//
+// "example.com" → "example.com:443"
+// "example.com:8443" → 그대로
+// "https://example.com/path" → "example.com:443" (URL 을 적어도 받아준다)
+func normalizeTLSTarget(target string) (string, error) {
+	if target == "" {
+		return "", fmt.Errorf("target 이 비어 있다")
+	}
+
+	// URL 형태로 적었으면 호스트만 뽑는다. 흔한 실수라 에러 대신 받아준다.
+	if strings.Contains(target, "://") {
+		u, err := url.Parse(target)
+		if err != nil || u.Host == "" {
+			return "", fmt.Errorf("tls 타입의 target 을 해석할 수 없다 (%q)", target)
+		}
+		target = u.Host
+	}
+
+	if _, _, err := net.SplitHostPort(target); err == nil {
+		return target, nil // 이미 포트가 있다
+	}
+	// 포트가 없으면 443 을 붙인다. 그래도 안 되면 형식이 잘못된 것이다.
+	withPort := net.JoinHostPort(target, "443")
+	if _, _, err := net.SplitHostPort(withPort); err != nil {
+		return "", fmt.Errorf("tls 타입의 target 을 해석할 수 없다 (%q)", target)
+	}
+	return withPort, nil
 }
 
 // applyDefaults 는 알림 설정의 빈 값을 채우고 웹훅 주소의 환경변수를 푼다.
