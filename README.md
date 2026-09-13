@@ -13,7 +13,7 @@
 - [x] **M0** — 순차 체크 · [기록](docs/05-M0-순차-체크.md)
 - [x] **M1** — 중앙 스케줄러 + 워커풀 · [설계 비교](docs/08-M1-동시성.md)
 - [x] **M2** — SQLite 저장 & 집계 · [기록](docs/10-M2-저장과집계.md)
-- [ ] **M3** — 알림 (플래핑 방지, 쿨다운)
+- [x] **M3** — 알림 (플래핑 방지, 쿨다운) · [기록](docs/11-M3-알림.md)
 - [ ] **M4** — 체크 타입 확장 (tcp / tls / dns)
 - [ ] **M5** — HTTP API + Next.js 상태 페이지
 - [ ] **M6** — 운영 준비 (graceful shutdown, metrics, Docker)
@@ -127,7 +127,36 @@ monitors:
     expected_status: 200 # 기본값 200
     keyword: 정상        # 선택 — 응답 본문에 이 문자열이 있어야 UP
     enabled: true       # 기본값 true
+
+alerts:
+  failure_threshold: 3  # 연속 3회 실패해야 down 확정 (플래핑 1차 방어)
+  success_threshold: 1  # 연속 1회 성공하면 up 확정
+  cooldown: 5m          # 같은 모니터 재발송 금지 간격 (플래핑 2차 방어)
+  # discord_webhook: ${UPCHECK_DISCORD_WEBHOOK}
+  # slack_webhook: ${UPCHECK_SLACK_WEBHOOK}
 ```
+
+웹훅 URL 자체가 인증 수단이다. 설정 파일에는 `${VAR}` 참조만 적고
+실제 주소는 환경변수로 넘긴다.
+
+```bash
+export UPCHECK_DISCORD_WEBHOOK="https://discord.com/api/webhooks/..."
+go run ./cmd/upcheck
+```
+
+웹훅을 지정하지 않아도 판정과 장애 이력 기록은 그대로 돌아간다.
+
+### 알림 규칙
+
+| 관문 | 하는 일 |
+|------|---------|
+| 임계치 | 연속 N회 실패해야 down 확정 — 일시적 끊김으로 깨우지 않는다 |
+| 상태 전이 | 이미 알린 상태와 같으면 안 보낸다 — 매 체크마다 보내지 않는다 |
+| 쿨다운 | X분 내 재발송 금지 — 억제된 알림은 잃지 않고 **미룬다** |
+
+실측: 3초 주기로 껐다 켜지는 엔드포인트를 60초 감시 → 알림 **3건**(쿨다운 20초 기준),
+29건 억제. 서버를 죽였다 살리면 down 1회 + up 1회. 근거는
+[docs/11-M3-알림.md](docs/11-M3-알림.md).
 
 ## 구조
 
@@ -137,8 +166,9 @@ cmd/slowserver/     테스트용 느린 서버 (동시성 측정 포함)
 internal/config/    YAML 파싱 · 기본값 · 검증
 internal/checker/   HTTP 체크 한 번
 internal/scheduler/ 스케줄러 두 구현 (pool / ticker)
-internal/store/     SQLite 저장 · 롤업 · 집계
+internal/store/     SQLite 저장 · 롤업 · 집계 · 장애 이력
 internal/collector/ 결과를 모아 배치로 저장
+internal/alert/     상태 전이 판정 · 알림 발송 (Discord / Slack)
 configs/            설정 파일
 docs/               Go 학습 노트
 ```
