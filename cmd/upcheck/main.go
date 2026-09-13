@@ -338,23 +338,26 @@ func printSummary(ctx context.Context, st *store.Store) error {
 	fmt.Printf("모니터 %d개 · 보관 중인 원본 체크 %d행 · %s 기준\n\n",
 		len(rows), total, now.Format("2006-01-02 15:04:05"))
 
-	fmt.Printf("%-4s %-22s %9s %9s %9s %9s %9s\n",
-		"상태", "모니터", "24h", "7d", "30d", "p50", "p95")
-	fmt.Println(strings.Repeat("─", 78))
+	fmt.Printf("%-4s %-5s %-20s %9s %9s %9s %9s %9s\n",
+		"상태", "타입", "모니터", "24h", "7d", "30d", "p50", "p95")
+	fmt.Println(strings.Repeat("─", 84))
 
 	for _, r := range rows {
-		state := "  ? "
+		state, typ := "  ? ", "-"
 		if r.LastCheck != nil {
 			state = " UP "
 			if !r.Up() {
 				state = "DOWN"
 			}
+			typ = r.LastCheck.Type
 		}
-		fmt.Printf("%-4s %-22s %8s %9s %9s %9s %9s\n",
-			state, truncate(r.Name, 22),
+		fmt.Printf("%-4s %-5s %-20s %8s %9s %9s %9s %9s\n",
+			state, typ, truncate(r.Name, 20),
 			pct(r.Uptime24h), pct(r.Uptime7d), pct(r.Uptime30d),
 			dur(r.Latency24h.P50), dur(r.Latency24h.P95))
 	}
+
+	printWarnings(rows)
 
 	if err := printIncidents(ctx, st, now); err != nil {
 		return err
@@ -370,6 +373,28 @@ func printSummary(ctx context.Context, st *store.Store) error {
 		}
 	}
 	return nil
+}
+
+// printWarnings 는 지금 걸려 있는 경고를 모아 보여준다.
+//
+// 경고는 실패가 아니라 업타임 표에는 안 나타난다.
+// 따로 보여주지 않으면 인증서가 만료될 때까지 아무도 모른다.
+func printWarnings(rows []store.MonitorStatus) {
+	var warned []store.MonitorStatus
+	for _, r := range rows {
+		if r.LastCheck != nil && r.LastCheck.Warning != "" {
+			warned = append(warned, r)
+		}
+	}
+	if len(warned) == 0 {
+		return
+	}
+
+	fmt.Printf("\n경고 %d건\n", len(warned))
+	fmt.Println(strings.Repeat("─", 84))
+	for _, r := range warned {
+		fmt.Printf("⚠  %-20s %s\n", truncate(r.Name, 20), r.LastCheck.Warning)
+	}
 }
 
 // printIncidents 는 최근 장애 이력을 보여준다.
@@ -496,14 +521,37 @@ func printStats(s scheduler.Stats) {
 
 func printResult(r checker.Result) {
 	status := "UP  "
-	detail := fmt.Sprintf("%d", r.StatusCode)
 	if !r.OK {
 		status = "DOWN"
-		detail = r.Err.Error()
 	}
+
+	detail := resultDetail(r)
+	if r.Warning != "" {
+		// 경고는 실패가 아니다. 상태는 UP 그대로 두고 문구만 덧붙인다.
+		detail += "  ⚠ " + r.Warning
+	}
+
 	// %-24s 는 왼쪽 정렬 24칸, %8v 는 오른쪽 정렬 8칸.
-	fmt.Printf("[%s] %-24s %8v  %s\n",
-		status, truncate(r.Monitor, 24), r.Latency.Round(time.Millisecond), detail)
+	fmt.Printf("[%s] %-5s %-24s %8v  %s\n",
+		status, r.Type, truncate(r.Monitor, 24), r.Latency.Round(time.Millisecond), detail)
+}
+
+// resultDetail 은 타입에 맞는 한 줄 설명을 만든다.
+//
+// http 는 상태 코드가 의미 있지만 tcp/tls/dns 는 그런 게 없다.
+// 그런 타입에 "0" 을 찍으면 읽는 사람이 헷갈리므로,
+// Prober 가 채워 준 Detail 을 쓴다.
+func resultDetail(r checker.Result) string {
+	if !r.OK {
+		return r.Err.Error()
+	}
+	if r.Detail != "" {
+		return r.Detail
+	}
+	if r.Type == config.TypeHTTP {
+		return fmt.Sprintf("%d", r.StatusCode)
+	}
+	return "정상"
 }
 
 // truncate 는 문자열이 길면 잘라낸다.
