@@ -1,0 +1,94 @@
+.back {
+  display: inline-block;
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  margin-bottom: 12px;
+}
+
+.back:hover {
+  text-decoration: underline;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.name {
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  margin: 0;
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+
+.sub {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.warning {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  box-shadow: inset 3px 0 0 var(--status-warning);
+  background: var(--surface);
+  font-size: 14px;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 24px;
+}
+
+@media (max-width: 720px) {
+  .tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* 2열에서 홀수 개면 마지막 타일이 반쪽짜리로 남는다 */
+  .tile:last-child:nth-child(odd) {
+    grid-column: span 2;
+  }
+}
+
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.tileLabel {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* 큰 단독 숫자는 비례폭 숫자. tabular-nums 는 표 열에만 쓴다. */
+.tileValue {
+  font-size: 22px;
+  font-weight: 650;
+  margin-top: 2px;
+}
+
+.note {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 10px 0 0;
+}
