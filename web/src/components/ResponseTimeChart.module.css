@@ -1,0 +1,95 @@
+.legend {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 선 차트의 범례는 상자가 아니라 선 조각이다 — 마크 모양을 따라간다 */
+.lineKey {
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+}
+
+.frame {
+  position: relative;
+  /* 높이를 고정해 둔다. 폭을 잰 뒤에 그리므로, 고정하지 않으면 그리는 순간 레이아웃이 튄다.
+     x축 라벨 영역까지 포함한 높이다 — 빼먹으면 카드 안에 작은 세로 스크롤이 생긴다. */
+  height: 244px;
+  touch-action: pan-y;
+}
+
+.frame svg {
+  display: block;
+  overflow: visible;
+}
+
+.frame:focus-visible {
+  outline: 2px solid var(--series-1);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.tick {
+  fill: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.endLabel {
+  fill: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tooltip {
+  position: absolute;
+  top: 0;
+  z-index: 5;
+  min-width: 150px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  font-size: 13px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.tipRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tipValue {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.tipName {
+  color: var(--text-secondary);
+}
+
+.tipDate {
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 13px;
+}
