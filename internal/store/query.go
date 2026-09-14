@@ -144,10 +144,15 @@ func (s *Store) Latency(ctx context.Context, monitorID int64, since, now time.Ti
 	// 이 프로젝트 규모에서는 과하다. 대신 근사임을 값에 담아 전달한다.
 	lat := Latency{Approx: true}
 
+	// 가중치는 ok_count(성공한 체크 수)다. total 이 아니다.
+	//
+	// 칸의 p50/p95 는 성공한 체크만으로 계산됐다(hourSamples 참고).
+	// total 로 가중하면 59번 실패하고 1번 성공한 시간이 60표를 받아서,
+	// 표본 1개짜리 백분위수가 멀쩡한 시간과 같은 무게로 섞인다.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT total, latency_p50, latency_p95, latency_max
+		SELECT ok_count, latency_p50, latency_p95, latency_max
 		FROM checks_hourly
-		WHERE monitor_id = ? AND hour >= ? AND hour < ?`,
+		WHERE monitor_id = ? AND hour >= ? AND hour < ? AND ok_count > 0`,
 		monitorID, unix(truncHour(since)), frontier)
 	if err != nil {
 		return Latency{}, fmt.Errorf("롤업 응답시간 조회 실패: %w", err)
@@ -157,13 +162,13 @@ func (s *Store) Latency(ctx context.Context, monitorID int64, since, now time.Ti
 	var sum50, sum95, weight int64
 	var maxMS int64
 	for rows.Next() {
-		var total, p50, p95, mx int64
-		if err := rows.Scan(&total, &p50, &p95, &mx); err != nil {
+		var okCount, p50, p95, mx int64
+		if err := rows.Scan(&okCount, &p50, &p95, &mx); err != nil {
 			return Latency{}, fmt.Errorf("롤업 응답시간 읽기 실패: %w", err)
 		}
-		sum50 += p50 * total
-		sum95 += p95 * total
-		weight += total
+		sum50 += p50 * okCount
+		sum95 += p95 * okCount
+		weight += okCount
 		maxMS = max(maxMS, mx)
 	}
 	if err := rows.Err(); err != nil {

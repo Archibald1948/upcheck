@@ -255,3 +255,53 @@ func TestSummary(t *testing.T) {
 		t.Error("up 의 p95 가 0이다")
 	}
 }
+
+// TestLatencyWeightsBySuccessfulSamples 는 롤업 칸을 합칠 때
+// 성공한 체크 수로 가중하는지 본다.
+//
+// 칸의 p50/p95 는 성공한 체크만으로 계산된다. 그런데 전체 개수(실패 포함)로
+// 가중하면, 거의 다 실패한 시간의 백분위수(표본 몇 개짜리)가
+// 부풀려진 무게로 섞인다.
+func TestLatencyWeightsBySuccessfulSamples(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	ids, _ := s.SyncMonitors(ctx, testMonitors("a"))
+	id := ids["a"]
+
+	now := time.Date(2026, 3, 1, 12, 30, 0, 0, time.UTC)
+	h1 := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	h2 := time.Date(2026, 3, 1, 11, 0, 0, 0, time.UTC)
+
+	var rows []CheckRow
+	// 10시: 60번 모두 성공, 100ms
+	for i := range 60 {
+		rows = append(rows, CheckRow{MonitorID: id, CheckedAt: h1.Add(time.Duration(i) * time.Minute), OK: true, LatencyMS: 100})
+	}
+	// 11시: 59번 실패 + 1번 성공(1000ms)
+	for i := range 59 {
+		rows = append(rows, CheckRow{MonitorID: id, CheckedAt: h2.Add(time.Duration(i) * time.Minute), OK: false, LatencyMS: 5000, Error: "타임아웃"})
+	}
+	rows = append(rows, CheckRow{MonitorID: id, CheckedAt: h2.Add(59 * time.Minute), OK: true, LatencyMS: 1000})
+
+	if err := s.InsertChecks(ctx, rows); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Rollup(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+
+	lat, err := s.Latency(ctx, id, h1, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 성공 표본은 100ms × 60개 + 1000ms × 1개.
+	// 올바른 가중평균: (100×60 + 1000×1) / 61 ≈ 114ms
+	// 잘못된 가중평균: (100×60 + 1000×60) / 120 = 550ms
+	if lat.P50 > 200*time.Millisecond {
+		t.Errorf("p50 = %v — 실패가 대부분인 시간이 과하게 반영됐다 (약 114ms 여야 한다)", lat.P50)
+	}
+	if lat.Samples != 61 {
+		t.Errorf("표본 %d개, 성공한 체크 61개여야 한다", lat.Samples)
+	}
+}
