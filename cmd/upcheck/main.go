@@ -16,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"runtime"
@@ -26,6 +27,7 @@ import (
 	"time"
 
 	"github.com/Archibald1948/upcheck/internal/alert"
+	"github.com/Archibald1948/upcheck/internal/api"
 	"github.com/Archibald1948/upcheck/internal/checker"
 	"github.com/Archibald1948/upcheck/internal/collector"
 	"github.com/Archibald1948/upcheck/internal/config"
@@ -53,6 +55,9 @@ func run() error {
 		dbPath     = flag.String("db", "upcheck.db", "SQLite 파일 경로")
 		report     = flag.Bool("report", false, "체크하지 않고 저장된 현황만 출력")
 		maintEvery = flag.Duration("maintain-every", 10*time.Minute, "롤업·정리 잡 주기")
+		httpAddr   = flag.String("http", ":8484", "API 서버 주소 (빈 값이면 끔)")
+		apiOnly    = flag.Bool("api-only", false, "체크하지 않고 저장된 데이터로 API 만 띄운다")
+		expose     = flag.Bool("expose-details", false, "API 응답에 target 주소·에러 원문·경고를 포함한다")
 	)
 	flag.Parse()
 
@@ -63,6 +68,23 @@ func run() error {
 	defer stop()
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	apiOpts := api.Options{ExposeDetails: *expose, DefaultTimezone: time.Local}
+
+	// -api-only 는 체크 없이 DB 를 읽어 API 만 띄운다.
+	// 프론트엔드를 개발할 때 데몬 전체를 돌리지 않아도 된다.
+	if *apiOnly {
+		if *httpAddr == "" {
+			return fmt.Errorf("-api-only 에는 -http 주소가 필요하다")
+		}
+		st, err := store.Open(ctx, *dbPath, log)
+		if err != nil {
+			return err
+		}
+		defer st.Close()
+		fmt.Printf("API 전용 모드 · DB %s · http://localhost%s/api/status · Ctrl+C 로 종료\n", *dbPath, *httpAddr)
+		return api.New(st, log, apiOpts).ListenAndServe(ctx, *httpAddr)
+	}
 
 	// -report 는 체크 없이 DB만 읽는다. 설정 파일도 필요 없다.
 	if *report {
@@ -131,6 +153,8 @@ func run() error {
 		maintEvery: *maintEvery,
 		rules:      rules,
 		dispatcher: dispatcher,
+		httpAddr:   *httpAddr,
+		apiOpts:    apiOpts,
 	})
 }
 
@@ -141,6 +165,8 @@ type daemonOpts struct {
 	maintEvery time.Duration
 	rules      alert.Rules
 	dispatcher *alert.Dispatcher
+	httpAddr   string
+	apiOpts    api.Options
 }
 
 // ─────────────────────────── M0: 순차 ───────────────────────────
@@ -207,6 +233,33 @@ func runDaemon(
 		targets[m.Name] = m.Target
 	}
 
+	// ── 실패할 수 있는 준비를 goroutine 을 띄우기 전에 전부 끝낸다 ──
+	//
+	// 순서가 중요하다. goroutine 을 먼저 띄워 놓고 뒤에서 에러로 return 하면,
+	// 그 goroutine 은 아무도 채널을 닫아주지 않아 영원히 기다린다.
+	// (docs/06 누수 패턴 2번 — 닫히지 않는 채널에서 받기)
+
+	engine := alert.NewEngine(st, ids, opts.rules, opts.dispatcher, log)
+	// 진행 중이던 장애를 복원한다. 재시작할 때마다 같은 장애로
+	// 알림이 다시 가는 걸 막는다.
+	if err := engine.Restore(ctx); err != nil {
+		return err
+	}
+
+	// API 서버 포트를 잡는다.
+	// 포트 충돌 같은 기동 실패를 goroutine 안에서 만나면 조용히 묻혀서,
+	// 체크는 도는데 상태 페이지만 안 뜨는 상태가 된다.
+	var apiLn net.Listener
+	if opts.httpAddr != "" {
+		ln, err := api.Listen(opts.httpAddr)
+		if err != nil {
+			return err
+		}
+		apiLn = ln
+	}
+
+	// ── 여기서부터 goroutine 을 띄운다. 이후로는 에러로 일찍 return 하지 않는다 ──
+
 	// 알림 발송을 별도 goroutine 으로 띄운다 (스펙 7절 함정).
 	// 웹훅 서버가 느려도 체크 루프는 멈추면 안 된다.
 	dispatchDone := make(chan struct{})
@@ -215,11 +268,12 @@ func runDaemon(
 		opts.dispatcher.Run(ctx)
 	}()
 
-	engine := alert.NewEngine(st, ids, opts.rules, opts.dispatcher, log)
-	// 진행 중이던 장애를 복원한다. 재시작할 때마다 같은 장애로
-	// 알림이 다시 가는 걸 막는다.
-	if err := engine.Restore(ctx); err != nil {
-		return err
+	var apiDone chan error
+	if apiLn != nil {
+		apiDone = make(chan error, 1)
+		srv := api.New(st, log, opts.apiOpts)
+		go func() { apiDone <- srv.Serve(ctx, apiLn) }()
+		fmt.Printf("API http://localhost%s/api/status\n\n", opts.httpAddr)
 	}
 
 	start := time.Now()
@@ -271,6 +325,15 @@ func runDaemon(
 
 	// 정리 잡이 마지막 롤업까지 끝내기를 기다린다.
 	<-maintDone
+
+	// API 서버가 진행 중인 요청을 마치고 내려가기를 기다린다.
+	// 이게 끝나기 전에 run() 이 반환하면 defer st.Close() 가 먼저 돌아서,
+	// 응답하던 요청이 닫힌 DB 를 만난다.
+	if apiDone != nil {
+		if err := <-apiDone; err != nil {
+			log.Error("API 서버 종료 중 오류", "err", err)
+		}
+	}
 
 	shutdown := time.Since(start)
 	fmt.Printf("\n── 종료 (구동 %v) ──\n", shutdown.Round(time.Millisecond))
