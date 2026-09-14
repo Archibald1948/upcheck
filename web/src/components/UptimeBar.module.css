@@ -1,0 +1,136 @@
+.wrap {
+  position: relative;
+}
+
+/*
+ * 칸 사이 2px 간격은 표면색으로 비워 둔 공간이다(dataviz 마크 규칙).
+ * 테두리를 그어 칸을 나누지 않는다 — 데이터가 아닌 잉크가 늘어난다.
+ */
+.bar {
+  display: flex;
+  gap: 2px;
+  height: 34px;
+  align-items: stretch;
+}
+
+.cell {
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 2px;
+  background: var(--status-none);
+  /* 칸이 좁아서 포인터를 정확히 대기 어렵다. 위아래로 히트 영역을 넓힌다. */
+  position: relative;
+  outline: none;
+  transition: opacity 80ms;
+}
+
+.cell::after {
+  content: "";
+  position: absolute;
+  inset: -6px -1px;
+}
+
+.good { background: var(--status-good); }
+.warning { background: var(--status-warning); }
+.serious { background: var(--status-serious); }
+.critical { background: var(--status-critical); }
+.none { background: var(--status-none); }
+
+/* 하나에 머무르면 나머지를 살짝 물려서 반응을 보여준다 */
+.bar:has(.active) .cell:not(.active) {
+  opacity: 0.55;
+}
+
+.cell.active {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--text-primary);
+}
+
+/*
+ * 좁은 화면에서는 최근 30일만 보여준다.
+ * 400px 폭에 90칸을 넣으면 칸이 2px 남짓이 되어 읽을 수도, 누를 수도 없다.
+ */
+@media (max-width: 640px) {
+  .older {
+    display: none;
+  }
+}
+
+.scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.scale .short {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .scale .long {
+    display: none;
+  }
+  .scale .short {
+    display: inline;
+  }
+}
+
+.tooltip {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  z-index: 10;
+  min-width: 168px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  font-size: 13px;
+  line-height: 1.45;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.tipValue {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 16px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.tipLabel {
+  color: var(--text-secondary);
+}
+
+.tipDate {
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.legendRange {
+  color: var(--text-muted);
+}
