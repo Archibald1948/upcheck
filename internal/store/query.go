@@ -113,7 +113,8 @@ func (s *Store) Uptime(ctx context.Context, monitorID int64, since, now time.Tim
 // Latency 는 [since, now] 구간의 응답시간 백분위수를 구한다.
 //
 // 구간이 전부 원본에 남아 있으면 표본을 직접 정렬해 **정확한** 값을 낸다.
-// 롤업 구간이 섞이면 근사할 수밖에 없어서 Approx 를 true 로 표시한다.
+// 원본이 정리돼 롤업에만 남은 구간이 섞이면 근사할 수밖에 없어서
+// Approx 를 true 로 표시한다.
 func (s *Store) Latency(ctx context.Context, monitorID int64, since, now time.Time) (Latency, error) {
 	frontier, err := s.rollupFrontier(ctx)
 	if err != nil {
@@ -122,8 +123,13 @@ func (s *Store) Latency(ctx context.Context, monitorID int64, since, now time.Ti
 
 	sinceUnix := unix(since)
 
+	rawComplete, err := s.rawCovers(ctx, monitorID, sinceUnix, frontier)
+	if err != nil {
+		return Latency{}, err
+	}
+
 	// 구간 전체가 원본에 있다 → 정확히 계산한다.
-	if sinceUnix >= frontier {
+	if rawComplete {
 		samples, err := s.rawLatencies(ctx, monitorID, sinceUnix, unix(now))
 		if err != nil {
 			return Latency{}, err
@@ -196,6 +202,47 @@ func (s *Store) Latency(ctx context.Context, monitorID int64, since, now time.Ti
 	lat.Max = time.Duration(maxMS) * time.Millisecond
 	lat.Samples = weight
 	return lat, nil
+}
+
+// rawCovers 는 원본(checks)만으로 [since, now] 를 빠짐없이 덮는지 알려준다.
+//
+// 롤업 경계(frontier)만 보면 안 된다. 롤업은 원본을 지우지 않고 접은 사본을
+// 만들 뿐이라, 정리 잡이 지우기 전까지(7일) 원본은 그대로 남아 있다.
+// 롤업이 10분마다 도는 데몬에서 frontier 만 기준으로 삼으면
+// 24시간 p95 가 **항상** 근사가 된다.
+//
+// 판정: since 보다 뒤이면서 원본의 가장 이른 시각보다 앞선 롤업 칸이
+// 하나라도 있으면, 그 구간은 원본이 지워지고 롤업에만 남아 있다는 뜻이다.
+//
+//	롤업 칸 [hour, hour+3600) 이 [since, minRaw) 와 겹치는가?
+//	  hour < minRaw  AND  hour + 3600 > since
+//
+// 정리 기준이 now-7일 이라 원본은 정시가 아닌 시각부터 남아 있을 수 있다.
+// 그래서 칸의 시작이 아니라 **끝**(hour+3600)과 since 를 비교한다.
+func (s *Store) rawCovers(ctx context.Context, monitorID, since, frontier int64) (bool, error) {
+	// 롤업이 경계보다 앞에 없으면 전부 원본이다.
+	if since >= frontier {
+		return true, nil
+	}
+
+	var minRaw sql.NullInt64
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT MIN(checked_at) FROM checks WHERE monitor_id = ?`, monitorID).Scan(&minRaw); err != nil {
+		return false, fmt.Errorf("원본 시작 시각 조회 실패: %w", err)
+	}
+	if !minRaw.Valid {
+		// 원본이 하나도 없다. 롤업만 있으면 근사, 아무것도 없으면 어차피 빈 결과다.
+		return false, nil
+	}
+
+	var overlap int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM checks_hourly
+		WHERE monitor_id = ? AND hour < ? AND hour + 3600 > ?`,
+		monitorID, minRaw.Int64, since).Scan(&overlap); err != nil {
+		return false, fmt.Errorf("원본 누락 구간 조회 실패: %w", err)
+	}
+	return overlap == 0, nil
 }
 
 // rawLatencies 는 성공한 체크의 지연시간만 모아 온다.

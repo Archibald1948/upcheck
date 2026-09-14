@@ -305,3 +305,78 @@ func TestLatencyWeightsBySuccessfulSamples(t *testing.T) {
 		t.Errorf("표본 %d개, 성공한 체크 61개여야 한다", lat.Samples)
 	}
 }
+
+// TestLatencyExactWhileRawRetained 는 롤업이 끝났더라도 원본이 아직
+// 구간을 다 덮고 있으면 정확한 값을 내는지 본다.
+//
+// 원본은 7일 보관하고 롤업은 10분마다 돈다. 롤업 경계만 보고 근사를 택하면
+// 운영 중인 데몬의 24시간 p95 는 **항상** 근사가 된다. 원본이 멀쩡히 있는데도.
+// 데모 데이터로 API 를 찍어 보다가 모든 모니터가 approx=true 인 걸 보고 찾았다.
+func TestLatencyExactWhileRawRetained(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	ids, _ := s.SyncMonitors(ctx, testMonitors("a"))
+	id := ids["a"]
+
+	now := time.Date(2026, 3, 10, 12, 30, 0, 0, time.UTC)
+	// 이틀치 원본. 롤업은 되지만 정리(7일 보관)는 되지 않는다.
+	seed(t, s, id, now.Add(-48*time.Hour), 48*time.Hour, 5*time.Minute, 0, 100)
+
+	if err := s.Maintain(ctx, now, DefaultRetention); err != nil {
+		t.Fatal(err)
+	}
+	if n := countRows(t, s, "checks_hourly"); n == 0 {
+		t.Fatal("롤업이 안 됐다 — 테스트 전제가 틀렸다")
+	}
+
+	lat, err := s.Latency(ctx, id, now.Add(-24*time.Hour), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lat.Approx {
+		t.Error("원본이 24시간을 다 덮고 있는데 근사로 계산했다")
+	}
+	// 5분 간격 24시간 = 288개 (+경계 1)
+	if lat.Samples < 288 {
+		t.Errorf("표본 %d개 — 원본에서 직접 셌다면 288개 이상이어야 한다", lat.Samples)
+	}
+}
+
+// TestLatencyApproxWhenRawPruned 는 원본이 정리된 구간이 섞이면
+// 여전히 근사로 표시하는지 본다. (위 수정이 이걸 깨면 안 된다)
+func TestLatencyApproxWhenRawPruned(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	ids, _ := s.SyncMonitors(ctx, testMonitors("a"))
+	id := ids["a"]
+
+	now := time.Date(2026, 3, 30, 12, 30, 0, 0, time.UTC)
+	seed(t, s, id, now.Add(-20*24*time.Hour), 20*24*time.Hour, 30*time.Minute, 0, 100)
+	if err := s.Maintain(ctx, now, DefaultRetention); err != nil {
+		t.Fatal(err)
+	}
+
+	// 30일 구간 — 7일 이전 원본은 지워졌다
+	lat, err := s.Latency(ctx, id, now.Add(-30*24*time.Hour), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !lat.Approx {
+		t.Error("원본이 지워진 구간이 섞였는데 정확하다고 표시했다")
+	}
+
+	// 경계가 원본 시작 시각과 같은 시간 칸 안에 걸친 경우도 근사여야 한다.
+	// 정리 기준이 now-7일 이라 원본이 정시가 아닌 시각부터 남아 있을 수 있다.
+	var minRaw int64
+	if err := s.db.QueryRow(`SELECT MIN(checked_at) FROM checks WHERE monitor_id = ?`, id).Scan(&minRaw); err != nil {
+		t.Fatal(err)
+	}
+	justBefore := fromUnix(minRaw).Add(-time.Minute)
+	lat, err = s.Latency(ctx, id, justBefore, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !lat.Approx {
+		t.Errorf("원본 시작(%v) 1분 전부터 묻는데 정확하다고 표시했다", fromUnix(minRaw))
+	}
+}
