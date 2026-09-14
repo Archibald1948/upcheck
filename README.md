@@ -15,16 +15,45 @@
 - [x] **M2** — SQLite 저장 & 집계 · [기록](docs/10-M2-저장과집계.md)
 - [x] **M3** — 알림 (플래핑 방지, 쿨다운) · [기록](docs/11-M3-알림.md)
 - [x] **M4** — 체크 타입 확장 (tcp / tls / dns) · [기록](docs/12-M4-체크타입.md)
-- [ ] **M5** — HTTP API + Next.js 상태 페이지
+- [x] **M5** — HTTP API + Next.js 상태 페이지 · [기록](docs/14-M5-API와-상태페이지.md)
 - [ ] **M6** — 운영 준비 (graceful shutdown, metrics, Docker)
 
 ## 요구 사항
 
-Go 1.27 이상.
+- Go 1.27 이상
+- 상태 페이지를 띄우려면 Node.js 20.9 이상
 
 ```bash
 brew install go
 ```
+
+## 상태 페이지 한 번에 보기
+
+90일치 데모 데이터로 상태 페이지를 바로 띄울 수 있다. 터미널 두 개가 필요하다.
+
+```bash
+go run ./cmd/seeddemo -db demo.db              # 90일 × 6개 모니터 데모 데이터
+go run ./cmd/upcheck -db demo.db -api-only     # 터미널 1: API 만 (:8484)
+
+cd web && npm install && npm run dev           # 터미널 2: http://localhost:3000
+```
+
+실제로 감시하면서 띄우려면 터미널 1 에서 `go run ./cmd/upcheck` 를 쓴다.
+체크하면서 같은 프로세스에서 API 를 함께 연다.
+
+```
+브라우저 ──> Next.js 서버 (web/) ──> upcheck API (:8484) ──> SQLite
+```
+
+브라우저는 Go API 를 직접 부르지 않는다. Next.js 서버 컴포넌트만 부르므로
+CORS 설정이 필요 없고 Go API 를 외부에 열 필요도 없다.
+
+| 화면 | 내용 |
+|---|---|
+| `/` | 전체 상태 배너 · 모니터별 90일 업타임 바 · 최근 장애 |
+| `/monitors/{id}` | 가용성·응답시간 타일 · 업타임 바 · 일별 응답시간 차트 · 장애 이력 |
+
+설계와 시행착오는 [docs/14-M5-API와-상태페이지.md](docs/14-M5-API와-상태페이지.md).
 
 ## 실행
 
@@ -58,6 +87,9 @@ DOWN 404 나는 주소                 0.00%     0.00%     0.00%         -      
 | `-quiet` | 개별 결과를 출력하지 않음 |
 | `-dump-goroutines` | 종료 후 남은 goroutine 스택 출력 |
 | `-db` | SQLite 파일 경로 (기본 `upcheck.db`) |
+| `-http` | API 서버 주소 (기본 `:8484`, 빈 값이면 끔) |
+| `-api-only` | 체크 없이 저장된 데이터로 API 만 제공 |
+| `-expose-details` | API 응답에 target 주소·에러 원문·경고 포함 (기본 숨김) |
 | `-report` | 체크하지 않고 저장된 현황만 출력 |
 | `-maintain-every` | 롤업·정리 잡 주기 (기본 10분) |
 
@@ -203,12 +235,15 @@ go run ./cmd/upcheck
 ```
 cmd/upcheck/        본체
 cmd/slowserver/     테스트용 느린 서버 (동시성 측정 포함)
+cmd/seeddemo/       90일 데모 데이터 생성기
 internal/config/    YAML 파싱 · 기본값 · 검증
 internal/checker/   체크 타입별 구현 (http / tcp / tls / dns)
 internal/scheduler/ 스케줄러 두 구현 (pool / ticker)
 internal/store/     SQLite 저장 · 롤업 · 집계 · 장애 이력
 internal/collector/ 결과를 모아 배치로 저장
 internal/alert/     상태 전이 판정 · 알림 발송 (Discord / Slack)
+internal/api/       상태 페이지용 HTTP JSON API
 configs/            설정 파일
+web/                Next.js 상태 페이지
 docs/               Go 학습 노트
 ```
