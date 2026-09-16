@@ -115,6 +115,11 @@ func (s *Store) migrate() error {
 	return nil
 }
 
+// Ping 은 DB 가 응답하는지 확인한다. 준비 상태(readiness) 점검에 쓴다.
+func (s *Store) Ping(ctx context.Context) error {
+	return s.db.PingContext(ctx)
+}
+
 // Close 는 DB 를 닫는다.
 func (s *Store) Close() error { return s.db.Close() }
 
