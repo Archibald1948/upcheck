@@ -3,6 +3,7 @@ package alert
 import (
 	"context"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/Archibald1948/upcheck/internal/checker"
@@ -70,8 +71,10 @@ type Engine struct {
 	states map[string]*monitorState
 	now    func() time.Time // 테스트에서 시간을 조작하려고 주입 가능하게 둔다
 
-	sent       int
-	suppressed int
+	// atomic 인 이유: Observe 는 collector goroutine 에서만 불리지만
+	// Stats() 는 /metrics 스크레이프에서 불린다.
+	sent       atomic.Int64
+	suppressed atomic.Int64
 }
 
 // EventSink 는 판정된 이벤트를 받는 곳이다.
@@ -142,11 +145,14 @@ func (e *Engine) Restore(ctx context.Context) error {
 
 // Stats 는 발송/억제 횟수다.
 type Stats struct {
-	Sent       int
-	Suppressed int
+	Sent       int64
+	Suppressed int64
 }
 
-func (e *Engine) Stats() Stats { return Stats{Sent: e.sent, Suppressed: e.suppressed} }
+// Stats 는 언제든, 어느 goroutine 에서든 부를 수 있다.
+func (e *Engine) Stats() Stats {
+	return Stats{Sent: e.sent.Load(), Suppressed: e.suppressed.Load()}
+}
 
 // Observe 는 체크 결과 하나를 받아 상태를 갱신하고, 필요하면 이벤트를 낸다.
 //
@@ -262,7 +268,7 @@ func (e *Engine) maybeNotify(st *monitorState, res checker.Result, target string
 	// 돌아갔으면 보낼 것도 없어진다. 이게 플래핑 방어의 핵심이다.
 	now := e.now()
 	if !st.notifiedAt.IsZero() && now.Sub(st.notifiedAt) < e.rules.Cooldown {
-		e.suppressed++
+		e.suppressed.Add(1)
 		e.log.Debug("쿨다운으로 알림 억제",
 			"monitor", res.Monitor, "상태", st.confirmed.String(),
 			"남은시간", (e.rules.Cooldown - now.Sub(st.notifiedAt)).Round(time.Second))
@@ -289,7 +295,7 @@ func (e *Engine) maybeNotify(st *monitorState, res checker.Result, target string
 
 	st.notified = st.confirmed
 	st.notifiedAt = now
-	e.sent++
+	e.sent.Add(1)
 
 	if e.sink != nil && !e.sink.Send(ev) {
 		e.log.Warn("알림 큐가 가득 차 이벤트를 버렸다", "monitor", res.Monitor)
