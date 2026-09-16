@@ -22,13 +22,11 @@ Go를 처음 접한다는 전제로 썼고, 설명마다 **이 레포의 실제 
 | [12-M4-체크타입.md](12-M4-체크타입.md) | tcp / tls / dns, Prober 인터페이스, 경고와 실패의 구분 | M4 끝나고 |
 | [13-HTTP-서버.md](13-HTTP-서버.md) | `http.Handler`, ServeMux 패턴, 미들웨어, JSON, 서버 타임아웃, Shutdown | api 패키지 볼 때 |
 | [14-M5-API와-상태페이지.md](14-M5-API와-상태페이지.md) | API 설계, 상태 페이지 구조, 데모 데이터로 찾은 버그 | M5 끝나고 |
+| [15-관측과-배포.md](15-관측과-배포.md) | Prometheus 지표, liveness/readiness, pprof, 멀티스테이지·distroless | metrics·admin·Dockerfile 볼 때 |
+| [16-M6-운영준비.md](16-M6-운영준비.md) | 완료 기준 전체 점검, 프로젝트 전체 돌아보기 | M6 끝나고 |
 
-## 앞으로 추가될 문서
-
-마일스톤을 진행하면서 채운다.
-
-- `15-M6-운영준비.md` — `/healthz`, Prometheus, pprof, Docker (M6)
-- `16-테스트.md` — `go test`, 테이블 테스트, `-race` 정리 (전 구간)
+모든 마일스톤(M0~M6)이 끝났습니다. [16번 문서](16-M6-운영준비.md) 마지막에
+전체 완료 기준 점검과 되짚어 보는 정리가 있습니다.
 
 ## 참고 자료
 

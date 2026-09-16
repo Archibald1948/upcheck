@@ -16,7 +16,7 @@
 - [x] **M3** — 알림 (플래핑 방지, 쿨다운) · [기록](docs/11-M3-알림.md)
 - [x] **M4** — 체크 타입 확장 (tcp / tls / dns) · [기록](docs/12-M4-체크타입.md)
 - [x] **M5** — HTTP API + Next.js 상태 페이지 · [기록](docs/14-M5-API와-상태페이지.md)
-- [ ] **M6** — 운영 준비 (graceful shutdown, metrics, Docker)
+- [x] **M6** — 운영 준비 (graceful shutdown, metrics, Docker) · [기록](docs/16-M6-운영준비.md)
 
 ## 요구 사항
 
@@ -26,6 +26,23 @@
 ```bash
 brew install go
 ```
+
+## 도커로 한 번에 띄우기
+
+```bash
+docker compose up --build     # → http://localhost:3000
+```
+
+| 포트 | 무엇 | 노출 |
+|---|---|---|
+| 3000 | 상태 페이지 | 호스트에 공개 |
+| 8484 | 공개 API | compose 내부만 |
+| 8485 | 운영 (metrics · healthz · pprof) | compose 내부만 |
+
+pprof 는 힙 내용과 goroutine 스택을, 지표는 내부 구조를 드러낸다.
+공개 API 와 같은 포트에 두지 않는다.
+
+이미지는 upcheck 27MB(distroless), 상태 페이지 350MB.
 
 ## 상태 페이지 한 번에 보기
 
@@ -90,6 +107,24 @@ DOWN 404 나는 주소                 0.00%     0.00%     0.00%         -      
 | `-http` | API 서버 주소 (기본 `:8484`, 빈 값이면 끔) |
 | `-api-only` | 체크 없이 저장된 데이터로 API 만 제공 |
 | `-expose-details` | API 응답에 target 주소·에러 원문·경고 포함 (기본 숨김) |
+| `-admin` | 운영 서버 주소 (기본 `127.0.0.1:8485`, 빈 값이면 끔) |
+| `-healthcheck` | 준비 상태를 확인하고 종료 (도커 HEALTHCHECK 용) |
+
+## 운영
+
+```bash
+curl http://127.0.0.1:8485/healthz    # liveness — 프로세스가 응답하는가
+curl http://127.0.0.1:8485/readyz     # readiness — DB까지 확인
+curl http://127.0.0.1:8485/metrics    # Prometheus 지표
+
+# goroutine 누수 확인 (Go 1.27 신규 프로파일)
+curl "http://127.0.0.1:8485/debug/pprof/goroutineleak?debug=1"
+go tool pprof -http=: http://127.0.0.1:8485/debug/pprof/heap
+```
+
+모니터 100개를 150초 구동하며 `go_goroutines` 를 재면 39개에서 평평하고
+`goroutineleak` 은 0이다. `docker compose stop` 은 1.44초에 끝난다.
+근거는 [docs/16-M6-운영준비.md](docs/16-M6-운영준비.md).
 | `-report` | 체크하지 않고 저장된 현황만 출력 |
 | `-maintain-every` | 롤업·정리 잡 주기 (기본 10분) |
 
@@ -243,7 +278,11 @@ internal/store/     SQLite 저장 · 롤업 · 집계 · 장애 이력
 internal/collector/ 결과를 모아 배치로 저장
 internal/alert/     상태 전이 판정 · 알림 발송 (Discord / Slack)
 internal/api/       상태 페이지용 HTTP JSON API
+internal/admin/     운영 엔드포인트 (healthz · metrics · pprof)
+internal/metrics/   Prometheus 지표
 configs/            설정 파일
 web/                Next.js 상태 페이지
 docs/               Go 학습 노트
+Dockerfile          upcheck 이미지 (멀티스테이지 → distroless)
+docker-compose.yml  전체 스택
 ```
