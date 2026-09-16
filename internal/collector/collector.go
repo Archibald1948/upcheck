@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/Archibald1948/upcheck/internal/checker"
@@ -34,10 +35,14 @@ type Collector struct {
 	batchSize     int
 	flushInterval time.Duration
 
-	// 통계
-	written int64
-	dropped int64 // DB에 없는 모니터라 버린 결과
-	failed  int64 // 저장 실패한 배치의 행 수
+	// 통계.
+	//
+	// atomic 인 이유: Run 은 collector goroutine 에서 돌고, Stats() 는
+	// /metrics 를 긁는 HTTP 핸들러 goroutine 에서 불린다. 평범한 int64 로
+	// 두면 data race 다 (go test -race 가 잡는다).
+	written atomic.Int64
+	dropped atomic.Int64 // DB에 없는 모니터라 버린 결과
+	failed  atomic.Int64 // 저장 실패한 배치의 행 수
 }
 
 // Option 은 Collector 설정을 바꾼다.
@@ -86,10 +91,9 @@ type Stats struct {
 	Failed  int64
 }
 
+// Stats 는 언제든, 어느 goroutine 에서든 부를 수 있다.
 func (c *Collector) Stats() Stats {
-	// Run 이 끝난 뒤에 부르는 걸 전제한다. Run 이 도는 동안 부르면
-	// 값이 찢어질 수 있으므로, 실시간으로 봐야 하면 atomic 으로 바꿔야 한다.
-	return Stats{Written: c.written, Dropped: c.dropped, Failed: c.failed}
+	return Stats{Written: c.written.Load(), Dropped: c.dropped.Load(), Failed: c.failed.Load()}
 }
 
 // Run 은 results 가 닫힐 때까지 결과를 받아 저장한다.
@@ -127,7 +131,7 @@ func (c *Collector) Run(ctx context.Context, results <-chan checker.Result, onRe
 
 			row, err := c.toRow(res)
 			if err != nil {
-				c.dropped++
+				c.dropped.Add(1)
 				c.log.Warn("결과를 저장할 수 없다", "monitor", res.Monitor, "err", err)
 				continue
 			}
@@ -155,11 +159,11 @@ func (c *Collector) flush(ctx context.Context, batch []store.CheckRow) {
 		return
 	}
 	if err := c.store.InsertChecks(ctx, batch); err != nil {
-		c.failed += int64(len(batch))
+		c.failed.Add(int64(len(batch)))
 		c.log.Error("체크 저장 실패", "rows", len(batch), "err", err)
 		return
 	}
-	c.written += int64(len(batch))
+	c.written.Add(int64(len(batch)))
 }
 
 // toRow 는 체크 결과를 DB 행으로 바꾼다.
