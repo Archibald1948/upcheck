@@ -82,6 +82,7 @@ func (p *tlsProber) Probe(ctx context.Context, m config.Monitor) Result {
 	res.OK = true
 
 	daysLeft := int(time.Until(leaf.NotAfter).Hours() / 24)
+	res.CertDaysLeft = &daysLeft
 	res.Detail = fmt.Sprintf("만료 D-%d (%s)", daysLeft, leaf.NotAfter.Local().Format("2006-01-02"))
 
 	if daysLeft <= m.CertWarnDays {

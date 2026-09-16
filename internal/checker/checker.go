@@ -30,6 +30,12 @@ type Result struct {
 	// 화면 표시 전용이라 DB에는 저장하지 않는다.
 	Detail string
 
+	// CertDaysLeft 는 TLS 인증서 만료까지 남은 일수다. tls 타입에서만 채워진다.
+	//
+	// 같은 값이 Detail·Warning 문자열에도 들어가지만, 지표로 쓰려면 숫자가 필요하다.
+	// 문자열에서 다시 파싱하는 건 문구를 손볼 때마다 조용히 깨진다.
+	CertDaysLeft *int
+
 	// Warning 은 "실패는 아니지만 알아둘 것"이다.
 	// 지금은 tls 인증서 만료 임박에만 쓴다.
 	//
@@ -115,6 +121,7 @@ func (c *Checker) Check(ctx context.Context, m config.Monitor) Result {
 	res.Err = out.Err
 	res.Detail = out.Detail
 	res.Warning = out.Warning
+	res.CertDaysLeft = out.CertDaysLeft
 	return res
 }
 
