@@ -15,8 +15,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
@@ -26,11 +28,21 @@ import (
 	"syscall"
 	"time"
 
+	// 시간대 데이터베이스를 바이너리에 넣는다.
+	//
+	// time.LoadLocation 은 보통 OS 의 /usr/share/zoneinfo 를 읽는다.
+	// distroless 나 scratch 이미지에는 그 파일이 없어서, 도커에서만
+	// "unknown time zone Asia/Seoul" 로 실패한다. import 한 줄로 해결된다
+	// (바이너리가 약 450KB 커진다).
+	_ "time/tzdata"
+
+	"github.com/Archibald1948/upcheck/internal/admin"
 	"github.com/Archibald1948/upcheck/internal/alert"
 	"github.com/Archibald1948/upcheck/internal/api"
 	"github.com/Archibald1948/upcheck/internal/checker"
 	"github.com/Archibald1948/upcheck/internal/collector"
 	"github.com/Archibald1948/upcheck/internal/config"
+	"github.com/Archibald1948/upcheck/internal/metrics"
 	"github.com/Archibald1948/upcheck/internal/scheduler"
 	"github.com/Archibald1948/upcheck/internal/store"
 )
@@ -46,20 +58,28 @@ func main() {
 
 func run() error {
 	var (
-		configPath = flag.String("config", "configs/monitors.yaml", "설정 파일 경로")
-		once       = flag.Bool("once", false, "순차적으로 한 번만 체크하고 종료 (M0 동작)")
-		schedName  = flag.String("scheduler", "pool", "스케줄러: pool | ticker")
-		duration   = flag.Duration("duration", 0, "이 시간만큼 돌고 자동 종료 (0=무한)")
-		quiet      = flag.Bool("quiet", false, "개별 결과를 출력하지 않는다 (측정용)")
-		dumpGo     = flag.Bool("dump-goroutines", false, "종료 후 남은 goroutine 스택을 출력 (누수 추적)")
-		dbPath     = flag.String("db", "upcheck.db", "SQLite 파일 경로")
-		report     = flag.Bool("report", false, "체크하지 않고 저장된 현황만 출력")
-		maintEvery = flag.Duration("maintain-every", 10*time.Minute, "롤업·정리 잡 주기")
-		httpAddr   = flag.String("http", ":8484", "API 서버 주소 (빈 값이면 끔)")
-		apiOnly    = flag.Bool("api-only", false, "체크하지 않고 저장된 데이터로 API 만 띄운다")
-		expose     = flag.Bool("expose-details", false, "API 응답에 target 주소·에러 원문·경고를 포함한다")
+		configPath  = flag.String("config", "configs/monitors.yaml", "설정 파일 경로")
+		once        = flag.Bool("once", false, "순차적으로 한 번만 체크하고 종료 (M0 동작)")
+		schedName   = flag.String("scheduler", "pool", "스케줄러: pool | ticker")
+		duration    = flag.Duration("duration", 0, "이 시간만큼 돌고 자동 종료 (0=무한)")
+		quiet       = flag.Bool("quiet", false, "개별 결과를 출력하지 않는다 (측정용)")
+		dumpGo      = flag.Bool("dump-goroutines", false, "종료 후 남은 goroutine 스택을 출력 (누수 추적)")
+		dbPath      = flag.String("db", "upcheck.db", "SQLite 파일 경로")
+		report      = flag.Bool("report", false, "체크하지 않고 저장된 현황만 출력")
+		maintEvery  = flag.Duration("maintain-every", 10*time.Minute, "롤업·정리 잡 주기")
+		httpAddr    = flag.String("http", ":8484", "API 서버 주소 (빈 값이면 끔)")
+		apiOnly     = flag.Bool("api-only", false, "체크하지 않고 저장된 데이터로 API 만 띄운다")
+		expose      = flag.Bool("expose-details", false, "API 응답에 target 주소·에러 원문·경고를 포함한다")
+		adminAddr   = flag.String("admin", "127.0.0.1:8485", "운영 서버 주소 (healthz·metrics·pprof, 빈 값이면 끔)")
+		healthcheck = flag.Bool("healthcheck", false, "운영 서버의 준비 상태를 확인하고 종료한다 (도커 HEALTHCHECK 용)")
 	)
 	flag.Parse()
+
+	// 컨테이너 헬스체크. distroless 이미지에는 curl 도 wget 도 없으므로
+	// 바이너리가 스스로를 확인한다.
+	if *healthcheck {
+		return runHealthcheck(*adminAddr)
+	}
 
 	// signal.NotifyContext 는 SIGINT/SIGTERM 을 받으면 자동으로 취소되는
 	// context 를 만들어준다. Ctrl+C 를 누르면 ctx.Done() 이 닫히고,
@@ -146,6 +166,22 @@ func run() error {
 		return err
 	}
 
+	m := metrics.New()
+	m.AddCounter("upcheck_checks_scheduled_total", "스케줄러가 큐에 넣은 작업 수",
+		func() float64 { return float64(sched.Stats().Scheduled) })
+	m.AddCounter("upcheck_checks_deferred_total", "큐가 가득 차 다음 tick 으로 미룬 횟수",
+		func() float64 { return float64(sched.Stats().Deferred) })
+	m.AddCounter("upcheck_checks_skipped_total", "이전 체크가 진행 중이라 건너뛴 횟수",
+		func() float64 { return float64(sched.Stats().Skipped) })
+	m.AddGauge("upcheck_scheduler_max_lag_seconds", "예정 시각 대비 가장 크게 밀린 정도",
+		func() float64 { return sched.Stats().MaxLag.Seconds() })
+	m.AddCounter("upcheck_notifications_sent_total", "알림 채널로 실제 발송된 수",
+		func() float64 { return float64(dispatcher.Stats().Sent) })
+	m.AddCounter("upcheck_notifications_failed_total", "알림 발송 실패 수",
+		func() float64 { return float64(dispatcher.Stats().Failed) })
+	m.AddCounter("upcheck_notifications_dropped_total", "알림 큐가 가득 차 버린 이벤트 수",
+		func() float64 { return float64(dispatcher.Stats().Dropped) })
+
 	return runDaemon(ctx, st, ids, sched, monitors, log, daemonOpts{
 		quiet:      *quiet,
 		dumpGo:     *dumpGo,
@@ -155,6 +191,8 @@ func run() error {
 		dispatcher: dispatcher,
 		httpAddr:   *httpAddr,
 		apiOpts:    apiOpts,
+		adminAddr:  *adminAddr,
+		metrics:    m,
 	})
 }
 
@@ -167,6 +205,47 @@ type daemonOpts struct {
 	dispatcher *alert.Dispatcher
 	httpAddr   string
 	apiOpts    api.Options
+	adminAddr  string
+	metrics    *metrics.Metrics
+}
+
+// runHealthcheck 은 운영 서버의 /readyz 를 찔러 보고 종료 코드로 답한다.
+//
+// 도커 HEALTHCHECK 는 명령의 종료 코드로 판단한다. distroless 이미지에는
+// 셸도 curl 도 없어서 흔히 쓰는 `curl -f .../healthz` 를 쓸 수 없다.
+// 바이너리에 모드를 하나 두면 이미지를 살찌우지 않고 해결된다.
+func runHealthcheck(adminAddr string) error {
+	if adminAddr == "" {
+		return fmt.Errorf("-healthcheck 에는 -admin 주소가 필요하다")
+	}
+	// ":8485" 처럼 호스트가 비어 있으면 자기 자신으로 본다.
+	host, port, err := net.SplitHostPort(adminAddr)
+	if err != nil {
+		return fmt.Errorf("잘못된 -admin 주소 %q: %w", adminAddr, err)
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	url := "http://" + net.JoinHostPort(host, port) + "/readyz"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("준비 상태 확인 실패: %w", err)
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("준비되지 않음 (HTTP %d)", resp.StatusCode)
+	}
+	return nil
 }
 
 // ─────────────────────────── M0: 순차 ───────────────────────────
@@ -258,6 +337,18 @@ func runDaemon(
 		apiLn = ln
 	}
 
+	var adminLn net.Listener
+	if opts.adminAddr != "" {
+		ln, err := admin.Listen(opts.adminAddr)
+		if err != nil {
+			if apiLn != nil {
+				apiLn.Close()
+			}
+			return err
+		}
+		adminLn = ln
+	}
+
 	// ── 여기서부터 goroutine 을 띄운다. 이후로는 에러로 일찍 return 하지 않는다 ──
 
 	// 알림 발송을 별도 goroutine 으로 띄운다 (스펙 7절 함정).
@@ -273,8 +364,17 @@ func runDaemon(
 		apiDone = make(chan error, 1)
 		srv := api.New(st, log, opts.apiOpts)
 		go func() { apiDone <- srv.Serve(ctx, apiLn) }()
-		fmt.Printf("API http://localhost%s/api/status\n\n", opts.httpAddr)
+		fmt.Printf("API   http://localhost%s/api/status\n", opts.httpAddr)
 	}
+
+	var adminDone chan error
+	if adminLn != nil {
+		adminDone = make(chan error, 1)
+		srv := admin.New(log, opts.metrics.Registry(), st)
+		go func() { adminDone <- srv.Serve(ctx, adminLn) }()
+		fmt.Printf("운영  http://localhost%s/metrics · /healthz · /debug/pprof/\n", opts.adminAddr)
+	}
+	fmt.Println()
 
 	start := time.Now()
 	results := sched.Run(ctx, monitors)
@@ -297,11 +397,20 @@ func runDaemon(
 	peakGoroutines := runtime.NumGoroutine()
 
 	coll := collector.New(st, ids, log)
+	opts.metrics.AddCounter("upcheck_checks_written_total", "DB에 저장된 체크 행 수",
+		func() float64 { return float64(coll.Stats().Written) })
+	opts.metrics.AddCounter("upcheck_check_write_failures_total", "저장에 실패한 체크 행 수",
+		func() float64 { return float64(coll.Stats().Failed) })
+	opts.metrics.AddCounter("upcheck_alerts_total", "판정 엔진이 발송하기로 정한 알림 수",
+		func() float64 { return float64(engine.Stats().Sent) })
+	opts.metrics.AddCounter("upcheck_alerts_suppressed_total", "쿨다운으로 억제된 알림 수",
+		func() float64 { return float64(engine.Stats().Suppressed) })
 
 	// collector 가 results 를 끝까지 읽는다. 이 함수가 반환했다는 건
 	// 채널이 닫혔다는 뜻이고, 곧 스케줄러가 완전히 정리됐다는 뜻이다.
 	err := coll.Run(ctx, results, func(res checker.Result) {
 		tally.add(res)
+		opts.metrics.ObserveCheck(res)
 		// 상태 전이 판정. 알릴 게 있으면 dispatcher 큐로 들어간다.
 		engine.Observe(ctx, res, targets[res.Monitor])
 
@@ -332,6 +441,11 @@ func runDaemon(
 	if apiDone != nil {
 		if err := <-apiDone; err != nil {
 			log.Error("API 서버 종료 중 오류", "err", err)
+		}
+	}
+	if adminDone != nil {
+		if err := <-adminDone; err != nil {
+			log.Error("운영 서버 종료 중 오류", "err", err)
 		}
 	}
 
