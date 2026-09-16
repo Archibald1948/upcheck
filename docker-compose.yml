@@ -1,0 +1,55 @@
+# upcheck 전체 스택.
+#
+#   docker compose up --build
+#   → http://localhost:3000  상태 페이지
+#
+# Go API(8484)와 운영 포트(8485)는 호스트로 내보내지 않는다.
+# 상태 페이지만 공개하고 나머지는 compose 내부 네트워크에만 둔다.
+# M5에서 브라우저가 Go API 를 직접 부르지 않게 만든 덕분에 가능한 구성이다.
+
+services:
+  upcheck:
+    build:
+      context: .
+    restart: unless-stopped
+    environment:
+      # 로그 시각과 -report 출력에 쓰인다.
+      # 저장은 언제나 UTC 이므로 이 값이 데이터에 섞이지는 않는다.
+      TZ: Asia/Seoul
+    volumes:
+      # SQLite 파일은 이름 있는 볼륨에 둔다. 컨테이너를 다시 만들어도 남는다.
+      - upcheck-data:/data
+      # 설정은 호스트에서 읽기 전용으로 붙인다. 고치고 컨테이너만 재시작하면 된다.
+      - ./configs:/etc/upcheck:ro
+    expose:
+      - "8484"   # API — web 컨테이너만 부른다
+      - "8485"   # 운영 — Prometheus 가 있다면 여기를 긁는다
+    healthcheck:
+      # Dockerfile 의 HEALTHCHECK 를 그대로 쓰지만, compose 쪽에도 적어 두면
+      # depends_on 의 조건과 함께 읽기 좋다.
+      test: ["CMD", "/usr/local/bin/upcheck", "-healthcheck", "-admin", "127.0.0.1:8485"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  web:
+    build:
+      context: ./web
+    restart: unless-stopped
+    environment:
+      # 컨테이너 이름이 그대로 호스트 이름이 된다 (compose 내부 DNS).
+      # 이 값을 실행 시점에 읽기 때문에 이미지 하나를 여러 환경에 쓸 수 있다.
+      # 빌드 시점에 박히는 NEXT_PUBLIC_ 을 쓰지 않은 이유다.
+      UPCHECK_API_URL: http://upcheck:8484
+      UPCHECK_TIMEZONE: Asia/Seoul
+    ports:
+      - "3000:3000"
+    depends_on:
+      upcheck:
+        # upcheck 가 준비되기 전에는 web 을 띄우지 않는다.
+        # 이 조건이 없으면 첫 화면이 "API 에 연결할 수 없습니다" 로 뜬다.
+        condition: service_healthy
+
+volumes:
+  upcheck-data:
