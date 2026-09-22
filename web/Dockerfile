@@ -1,6 +1,4 @@
 # 상태 페이지 이미지 (멀티스테이지)
-#
-# 빌드 컨텍스트는 web/ 이다 (compose 의 build.context 참고).
 
 # ─────────────── 1단계: 의존성 ───────────────
 FROM node:22-alpine AS deps
