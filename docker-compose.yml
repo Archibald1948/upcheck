@@ -1,11 +1,4 @@
 # upcheck 전체 스택.
-#
-#   docker compose up --build
-#   → http://localhost:3000  상태 페이지
-#
-# Go API(8484)와 운영 포트(8485)는 호스트로 내보내지 않는다.
-# 상태 페이지만 공개하고 나머지는 compose 내부 네트워크에만 둔다.
-# M5에서 브라우저가 Go API 를 직접 부르지 않게 만든 덕분에 가능한 구성이다.
 
 services:
   upcheck:
