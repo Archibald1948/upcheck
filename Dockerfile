@@ -1,7 +1,4 @@
 # upcheck 데몬 이미지 (멀티스테이지)
-#
-# 1단계에서 Go 툴체인으로 빌드하고, 2단계에는 바이너리만 옮긴다.
-# 최종 이미지에 컴파일러·소스·패키지 매니저가 남지 않는다.
 
 # ─────────────── 1단계: 빌드 ───────────────
 FROM golang:1.27-alpine AS build
@@ -15,10 +12,6 @@ RUN go mod download
 
 COPY . .
 
-# CGO_ENABLED=0 이 핵심이다. C 라이브러리에 링크하지 않은 정적 바이너리가 나와서
-# libc 조차 없는 distroless/static 이미지에서 그대로 돈다.
-# (M2에서 순수 Go SQLite 드라이버를 고른 이유가 여기서 값을 한다)
-#
 #   -trimpath : 빌드 머신의 파일 경로를 바이너리에서 지운다
 #   -s -w     : 디버그 심볼과 DWARF 를 빼서 크기를 줄인다
 RUN CGO_ENABLED=0 GOOS=linux go build \
