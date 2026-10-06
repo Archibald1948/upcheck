@@ -1,8 +1,5 @@
 import type { MonitorState, Overall } from "./types";
 
-// 업타임 칸 하나의 등급.
-// 색은 dataviz 상태 팔레트(good/warning/serious/critical)를 쓰고,
-// 색만으로 뜻을 전하지 않도록 항상 라벨과 함께 보여준다.
 export type Level = "good" | "warning" | "serious" | "critical" | "none";
 
 export function uptimeLevel(uptime: number | null): Level {
@@ -21,7 +18,6 @@ export const LEVEL_LABEL: Record<Level, string> = {
   none: "기록 없음",
 };
 
-// 범례에 쓸 설명. 기준값을 숨기지 않는다.
 export const LEVEL_RANGE: Record<Level, string> = {
   good: "99.9% 이상",
   warning: "99% 이상",
@@ -49,10 +45,7 @@ export const OVERALL: Record<Overall, { label: string; level: Level }> = {
   unknown: { label: "상태를 확인하는 중입니다", level: "none" },
 };
 
-/**
- * 기간 전체 가용성. 칸별 백분율을 평균내지 않고 체크 수로 다시 계산한다.
- * 체크가 10번뿐인 날과 288번인 날을 같은 무게로 섞으면 틀린 값이 나온다.
- */
+// 일별 백분율을 평균내지 않고 체크 수로 다시 계산한다 (날마다 체크 수가 다르다).
 export function periodUptime(days: { checks: number; failed: number }[]): number | null {
   let checks = 0;
   let failed = 0;
