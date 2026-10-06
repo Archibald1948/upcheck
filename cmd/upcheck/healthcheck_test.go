@@ -8,10 +8,7 @@ import (
 	"testing"
 )
 
-// TestRunHealthcheck 은 도커 HEALTHCHECK 가 쓰는 모드를 검증한다.
-//
-// 도커는 명령의 **종료 코드**로 컨테이너 상태를 판단한다.
-// 200 이면 nil(코드 0), 그 밖이면 에러(코드 1)여야 한다.
+// TestRunHealthcheck 은 200 이면 nil, 그 밖이면 에러인지 본다.
 func TestRunHealthcheck(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -45,11 +42,7 @@ func TestRunHealthcheck(t *testing.T) {
 	}
 }
 
-// TestRunHealthcheckResolvesBindAddress 는 ":8485" 나 "0.0.0.0:8485" 처럼
-// 호스트가 비어 있는 bind 주소를 자기 자신으로 바꿔 부르는지 본다.
-//
-// 컨테이너 안에서 -admin 0.0.0.0:8485 로 띄워 두고 같은 값을 헬스체크에
-// 넘기는 일이 흔하다. 그대로 요청하면 연결되지 않는다.
+// TestRunHealthcheckResolvesBindAddress 는 ":8485" 나 "0.0.0.0:8485" 같은 bind 주소를 자기 자신으로 바꿔 부르는지 본다.
 func TestRunHealthcheckResolvesBindAddress(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
