@@ -1,6 +1,4 @@
-// Go API(internal/api/types.go)의 응답 모양을 그대로 옮긴 타입.
-// 필드 이름·null 가능 여부가 서버와 어긋나면 화면이 조용히 틀린다.
-// Go 쪽을 바꾸면 여기도 같이 바꾼다.
+// internal/api/types.go 와 맞춰야 한다.
 
 export type Overall = "operational" | "degraded" | "outage" | "unknown";
 export type MonitorState = "up" | "down" | "unknown";
