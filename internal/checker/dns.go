@@ -12,11 +12,7 @@ import (
 )
 
 // dnsProber 는 레코드가 기대한 값으로 해석되는지 본다.
-//
-// DNS 가 엉뚱한 곳을 가리키는 사고는 서버가 멀쩡해도 서비스를 죽인다.
-// HTTP 체크로는 안 잡힌다 — 엉뚱한 서버가 200 을 잘 돌려주기 때문이다.
 type dnsProber struct {
-	// 시스템 기본 리졸버. 모니터마다 다른 리졸버를 쓰면 그때 새로 만든다.
 	system *net.Resolver
 }
 
@@ -54,8 +50,7 @@ func (p *dnsProber) Probe(ctx context.Context, m config.Monitor) Result {
 		return res
 	}
 
-	// 기대값 중 하나라도 나오면 정상으로 본다.
-	// 라운드로빈 DNS 처럼 여러 값이 번갈아 나오는 경우를 받아주려는 것이다.
+	// 기대값 중 하나라도 나오면 정상으로 본다 (라운드로빈 DNS).
 	for _, want := range m.Expect {
 		if containsFold(got, want) {
 			res.OK = true
@@ -69,14 +64,11 @@ func (p *dnsProber) Probe(ctx context.Context, m config.Monitor) Result {
 }
 
 // customResolver 는 지정한 DNS 서버만 쓰는 리졸버를 만든다.
-//
-// PreferGo 를 켜야 Go 자체 DNS 구현이 쓰이고, 그래야 Dial 을 가로챌 수 있다.
-// cgo 리졸버(OS 기본)는 서버를 골라 쓸 방법이 없다.
+// PreferGo 를 켜야 Dial 을 가로챌 수 있다.
 func customResolver(addr string) *net.Resolver {
 	return &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			// 세 번째 인자(원래 주소)를 버리고 우리가 지정한 서버로 보낸다.
 			return (&net.Dialer{}).DialContext(ctx, network, addr)
 		},
 	}
@@ -142,9 +134,6 @@ func ipNetwork(record string) string {
 }
 
 // containsFold 는 대소문자를 무시하고 값이 들어 있는지 본다.
-//
-// 도메인 이름은 대소문자를 구분하지 않는다. "Example.com" 과
-// "example.com" 은 같은 이름이라, 설정에 대문자로 적었다고 실패하면 안 된다.
 func containsFold(list []string, want string) bool {
 	for _, v := range list {
 		if strings.EqualFold(strings.TrimSuffix(v, "."), strings.TrimSuffix(want, ".")) {
