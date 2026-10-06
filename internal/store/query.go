@@ -27,7 +27,6 @@ type Latency struct {
 	Samples       int64
 
 	// Approx 가 true 면 롤업된 값에서 근사한 것이다.
-	// 백분위수는 합칠 수 없어서(p95들의 평균은 p95가 아니다) 정확하지 않다.
 	Approx bool
 }
 
@@ -48,12 +47,7 @@ type MonitorStatus struct {
 // Up 은 마지막 체크가 성공이었는지 알려준다.
 func (m MonitorStatus) Up() bool { return m.LastCheck != nil && m.LastCheck.OK }
 
-// rollupFrontier 는 롤업이 끝난 지점을 돌려준다.
-//
-// 이 시각보다 앞은 checks_hourly 에 접혀 있고, 뒤는 checks 에 원본으로 있다.
-// 두 테이블을 이어 붙일 때 이 경계를 쓰면 중복도 누락도 없다.
-//
-// 롤업이 한 번도 안 돌았으면 0이라 전부 원본에서 읽는다.
+// rollupFrontier 는 롤업이 끝난 지점을 돌려준다. 롤업이 없으면 0.
 func (s *Store) rollupFrontier(ctx context.Context) (int64, error) {
 	var frontier int64
 	err := s.db.QueryRowContext(ctx,
@@ -65,13 +59,7 @@ func (s *Store) rollupFrontier(ctx context.Context) (int64, error) {
 }
 
 // Uptime 은 [since, now] 구간의 업타임을 구한다.
-//
-// 롤업 구간과 원본 구간을 경계로 나눠 더한다.
-// 개수 합은 결합법칙이 성립해서, 접어 둔 값을 더해도 **정확히** 같은 값이 나온다.
-//
-// 다만 경계가 정시 단위라, 구간 시작점이 정시가 아니면 첫 칸에
-// since 이전 데이터가 최대 59분까지 섞인다. 24시간/7일/30일 같은
-// 긴 구간에서는 무시할 만한 오차다.
+// 첫 칸은 정시로 내려 읽어서 since 이전 데이터가 최대 59분 섞인다.
 func (s *Store) Uptime(ctx context.Context, monitorID int64, since, now time.Time) (Uptime, error) {
 	frontier, err := s.rollupFrontier(ctx)
 	if err != nil {
@@ -111,10 +99,7 @@ func (s *Store) Uptime(ctx context.Context, monitorID int64, since, now time.Tim
 }
 
 // Latency 는 [since, now] 구간의 응답시간 백분위수를 구한다.
-//
-// 구간이 전부 원본에 남아 있으면 표본을 직접 정렬해 **정확한** 값을 낸다.
-// 원본이 정리돼 롤업에만 남은 구간이 섞이면 근사할 수밖에 없어서
-// Approx 를 true 로 표시한다.
+// 롤업에만 남은 구간이 섞이면 근사하고 Approx 를 true 로 표시한다.
 func (s *Store) Latency(ctx context.Context, monitorID int64, since, now time.Time) (Latency, error) {
 	frontier, err := s.rollupFrontier(ctx)
 	if err != nil {
@@ -128,7 +113,6 @@ func (s *Store) Latency(ctx context.Context, monitorID int64, since, now time.Ti
 		return Latency{}, err
 	}
 
-	// 구간 전체가 원본에 있다 → 정확히 계산한다.
 	if rawComplete {
 		samples, err := s.rawLatencies(ctx, monitorID, sinceUnix, unix(now))
 		if err != nil {
@@ -143,18 +127,10 @@ func (s *Store) Latency(ctx context.Context, monitorID int64, since, now time.Ti
 		}, nil
 	}
 
-	// 롤업 구간이 섞였다 → 칸별 백분위수를 개수로 가중평균한다.
-	//
-	// 엄밀히는 틀린 계산이다. p95 들의 평균은 전체의 p95 가 아니다.
-	// 정확히 하려면 칸마다 히스토그램이나 t-digest 를 저장해야 하는데,
-	// 이 프로젝트 규모에서는 과하다. 대신 근사임을 값에 담아 전달한다.
+	// 롤업 구간이 섞였다 → 칸별 백분위수를 개수로 가중평균한다(근사).
 	lat := Latency{Approx: true}
 
-	// 가중치는 ok_count(성공한 체크 수)다. total 이 아니다.
-	//
-	// 칸의 p50/p95 는 성공한 체크만으로 계산됐다(hourSamples 참고).
-	// total 로 가중하면 59번 실패하고 1번 성공한 시간이 60표를 받아서,
-	// 표본 1개짜리 백분위수가 멀쩡한 시간과 같은 무게로 섞인다.
+	// 가중치는 total 이 아니라 ok_count 다. 칸의 백분위수는 성공한 체크로만 계산됐다.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT ok_count, latency_p50, latency_p95, latency_max
 		FROM checks_hourly
@@ -205,22 +181,8 @@ func (s *Store) Latency(ctx context.Context, monitorID int64, since, now time.Ti
 }
 
 // rawCovers 는 원본(checks)만으로 [since, now] 를 빠짐없이 덮는지 알려준다.
-//
-// 롤업 경계(frontier)만 보면 안 된다. 롤업은 원본을 지우지 않고 접은 사본을
-// 만들 뿐이라, 정리 잡이 지우기 전까지(7일) 원본은 그대로 남아 있다.
-// 롤업이 10분마다 도는 데몬에서 frontier 만 기준으로 삼으면
-// 24시간 p95 가 **항상** 근사가 된다.
-//
-// 판정: since 보다 뒤이면서 원본의 가장 이른 시각보다 앞선 롤업 칸이
-// 하나라도 있으면, 그 구간은 원본이 지워지고 롤업에만 남아 있다는 뜻이다.
-//
-//	롤업 칸 [hour, hour+3600) 이 [since, minRaw) 와 겹치는가?
-//	  hour < minRaw  AND  hour + 3600 > since
-//
-// 정리 기준이 now-7일 이라 원본은 정시가 아닌 시각부터 남아 있을 수 있다.
-// 그래서 칸의 시작이 아니라 **끝**(hour+3600)과 since 를 비교한다.
+// 롤업은 원본을 지우지 않으므로 frontier 만 보면 안 된다.
 func (s *Store) rawCovers(ctx context.Context, monitorID, since, frontier int64) (bool, error) {
-	// 롤업이 경계보다 앞에 없으면 전부 원본이다.
 	if since >= frontier {
 		return true, nil
 	}
@@ -231,10 +193,10 @@ func (s *Store) rawCovers(ctx context.Context, monitorID, since, frontier int64)
 		return false, fmt.Errorf("원본 시작 시각 조회 실패: %w", err)
 	}
 	if !minRaw.Valid {
-		// 원본이 하나도 없다. 롤업만 있으면 근사, 아무것도 없으면 어차피 빈 결과다.
 		return false, nil
 	}
 
+	// 원본이 정시가 아닌 시각부터 남아 있을 수 있어 칸의 끝(hour+3600)과 since 를 비교한다.
 	var overlap int
 	if err := s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM checks_hourly
@@ -269,9 +231,7 @@ func (s *Store) rawLatencies(ctx context.Context, monitorID, from, to int64) ([]
 }
 
 // LastCheck 는 모니터의 가장 최근 체크를 돌려준다. 없으면 (nil, nil).
-//
-// MAX(checked_at) 이 아니라 MAX(id) 로 찾는다. id 는 단조 증가라
-// 같은 초에 두 번 체크돼도 순서가 명확하다.
+// 같은 초에 두 번 체크될 수 있어 checked_at 이 아니라 MAX(id) 로 찾는다.
 func (s *Store) LastCheck(ctx context.Context, monitorID int64) (*CheckRow, error) {
 	var (
 		r         CheckRow
@@ -284,8 +244,6 @@ func (s *Store) LastCheck(ctx context.Context, monitorID int64) (*CheckRow, erro
 		WHERE id = (SELECT MAX(id) FROM checks WHERE monitor_id = ?)`,
 		monitorID).Scan(&r.MonitorID, &r.Type, &checkedAt, &okInt, &r.StatusCode, &r.LatencyMS, &r.Error, &r.Warning)
 
-	// 행이 없는 건 에러가 아니라 "아직 체크 안 함"이다.
-	// sql.ErrNoRows 를 errors.Is 로 구분해 호출부에 nil 을 준다.
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -334,8 +292,6 @@ func (s *Store) Monitors(ctx context.Context, onlyEnabled bool) ([]MonitorRow, e
 }
 
 // Summary 는 활성 모니터 전체의 현황을 모아 온다.
-//
-// 스펙 M2가 요구한 "업타임 % (24h / 7d / 30d), 응답시간 p50 / p95, 현재 상태".
 func (s *Store) Summary(ctx context.Context, now time.Time) ([]MonitorStatus, error) {
 	monitors, err := s.Monitors(ctx, true)
 	if err != nil {
