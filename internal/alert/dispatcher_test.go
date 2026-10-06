@@ -78,19 +78,9 @@ func TestDispatcherFansOutToAllNotifiers(t *testing.T) {
 	}
 }
 
-// TestSendNeverBlocks 는 스펙 7절 함정을 검증한다.
-//
-//	"알림 발송이 체크 루프를 블로킹" → 별도 goroutine + 버퍼 채널
-//
-// 큐가 가득 차도 Send 는 즉시 반환해야 한다. 여기서 기다리면
-// 판정 → collector → 스케줄러까지 줄줄이 멈춘다.
+// TestSendNeverBlocks 는 큐가 가득 차도 Send 가 즉시 반환하는지 본다.
 func TestSendNeverBlocks(t *testing.T) {
-	// 아주 느린 채널 + 작은 큐.
-	//
-	// 발송 시한을 짧게 준 이유: 검증 대상은 Send 가 안 막히는 것이고,
-	// 그건 즉시 확인된다. 하지만 뒷정리(Close → 큐 비우기)는 큐에 남은
-	// 이벤트마다 시한이 끝나기를 기다린다. 시한이 길면 테스트가
-	// 검증과 무관한 대기로 수십 초를 잡아먹는다.
+	// 발송 시한이 길면 뒷정리(큐 비우기)가 이벤트마다 시한을 기다려 테스트가 느려진다.
 	slow := &recordingNotifier{name: "slow", delay: time.Hour}
 	d := NewDispatcher(quietLogger(), []Notifier{slow},
 		WithQueueSize(2), WithSendTimeout(50*time.Millisecond))
@@ -123,7 +113,6 @@ func TestSendNeverBlocks(t *testing.T) {
 }
 
 // TestDispatcherDrainsOnClose 는 종료 시 큐에 남은 알림을 마저 보내는지 본다.
-// "서비스가 죽었다"는 알림을 종료하느라 잃으면 곤란하다.
 func TestDispatcherDrainsOnClose(t *testing.T) {
 	n := &recordingNotifier{name: "n", delay: 20 * time.Millisecond}
 	d := NewDispatcher(quietLogger(), []Notifier{n}, WithQueueSize(32))
