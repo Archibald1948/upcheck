@@ -1,7 +1,6 @@
 import type { Level } from "@/lib/status";
 
-// 상태 색은 절대 혼자 뜻을 전하지 않는다. 모양이 다른 아이콘을 함께 쓴다.
-// 색각 이상이 있거나 흑백으로 인쇄해도 정상/장애가 구분돼야 한다.
+// 색각 이상·흑백 인쇄에서도 구분되도록 상태마다 모양이 다르다.
 export function StatusIcon({ level, size = 16 }: { level: Level; size?: number }) {
   const color = `var(--status-${level})`;
   const common = {
