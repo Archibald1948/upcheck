@@ -80,7 +80,6 @@
   color: var(--text-muted);
 }
 
-/* 큰 단독 숫자는 비례폭 숫자. tabular-nums 는 표 열에만 쓴다. */
 .tileValue {
   font-size: 22px;
   font-weight: 650;
