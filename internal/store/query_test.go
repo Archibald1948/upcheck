@@ -8,16 +8,13 @@ import (
 
 // TestUptimeExactAcrossSeam 은 롤업 구간과 원본 구간을 이어 붙인 업타임이
 // 원본만으로 센 값과 **정확히** 같은지 본다.
-//
-// 이게 M2의 핵심 계약이다. 오래된 데이터를 접어도 업타임 %는 안 변해야 한다.
 func TestUptimeExactAcrossSeam(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
 	ids, _ := s.SyncMonitors(ctx, testMonitors("a"))
 	id := ids["a"]
 
-	// 구간 시작을 정시에 맞춘다.
-	// 롤업 칸이 1시간 단위라, 중간에서 시작하면 첫 칸에 이전 데이터가 섞인다.
+	// 구간 시작을 정시에 맞춘다. 아니면 첫 칸에 이전 데이터가 섞인다.
 	now := time.Date(2026, 3, 1, 12, 30, 0, 0, time.UTC)
 	from := time.Date(2026, 3, 1, 6, 0, 0, 0, time.UTC)
 
@@ -131,9 +128,6 @@ func TestLatencyExactWhenRawAvailable(t *testing.T) {
 
 // TestLatencyMarkedApproxAfterRollup 은 롤업 구간이 섞이면
 // Approx 가 true 로 표시되는지 본다.
-//
-// 백분위수는 합칠 수 없어서(p95 들의 평균은 p95 가 아니다) 근사일 수밖에 없다.
-// 중요한 건 "근사라는 사실을 숨기지 않는 것"이다.
 func TestLatencyMarkedApproxAfterRollup(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
@@ -162,8 +156,6 @@ func TestLatencyMarkedApproxAfterRollup(t *testing.T) {
 
 // TestLatencyIgnoresFailedChecks 는 실패한 체크의 시간이
 // 백분위수에 섞이지 않는지 본다.
-//
-// 실패 체크의 '응답시간'은 타임아웃까지 걸린 시간이라, 섞으면 수치가 왜곡된다.
 func TestLatencyIgnoresFailedChecks(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
@@ -258,10 +250,6 @@ func TestSummary(t *testing.T) {
 
 // TestLatencyWeightsBySuccessfulSamples 는 롤업 칸을 합칠 때
 // 성공한 체크 수로 가중하는지 본다.
-//
-// 칸의 p50/p95 는 성공한 체크만으로 계산된다. 그런데 전체 개수(실패 포함)로
-// 가중하면, 거의 다 실패한 시간의 백분위수(표본 몇 개짜리)가
-// 부풀려진 무게로 섞인다.
 func TestLatencyWeightsBySuccessfulSamples(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
@@ -295,9 +283,7 @@ func TestLatencyWeightsBySuccessfulSamples(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 성공 표본은 100ms × 60개 + 1000ms × 1개.
-	// 올바른 가중평균: (100×60 + 1000×1) / 61 ≈ 114ms
-	// 잘못된 가중평균: (100×60 + 1000×60) / 120 = 550ms
+	// 올바른 가중평균 ≈ 114ms, total 로 가중하면 550ms
 	if lat.P50 > 200*time.Millisecond {
 		t.Errorf("p50 = %v — 실패가 대부분인 시간이 과하게 반영됐다 (약 114ms 여야 한다)", lat.P50)
 	}
@@ -308,10 +294,6 @@ func TestLatencyWeightsBySuccessfulSamples(t *testing.T) {
 
 // TestLatencyExactWhileRawRetained 는 롤업이 끝났더라도 원본이 아직
 // 구간을 다 덮고 있으면 정확한 값을 내는지 본다.
-//
-// 원본은 7일 보관하고 롤업은 10분마다 돈다. 롤업 경계만 보고 근사를 택하면
-// 운영 중인 데몬의 24시간 p95 는 **항상** 근사가 된다. 원본이 멀쩡히 있는데도.
-// 데모 데이터로 API 를 찍어 보다가 모든 모니터가 approx=true 인 걸 보고 찾았다.
 func TestLatencyExactWhileRawRetained(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
@@ -343,7 +325,7 @@ func TestLatencyExactWhileRawRetained(t *testing.T) {
 }
 
 // TestLatencyApproxWhenRawPruned 는 원본이 정리된 구간이 섞이면
-// 여전히 근사로 표시하는지 본다. (위 수정이 이걸 깨면 안 된다)
+// 여전히 근사로 표시하는지 본다.
 func TestLatencyApproxWhenRawPruned(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
@@ -366,7 +348,6 @@ func TestLatencyApproxWhenRawPruned(t *testing.T) {
 	}
 
 	// 경계가 원본 시작 시각과 같은 시간 칸 안에 걸친 경우도 근사여야 한다.
-	// 정리 기준이 now-7일 이라 원본이 정시가 아닌 시각부터 남아 있을 수 있다.
 	var minRaw int64
 	if err := s.db.QueryRow(`SELECT MIN(checked_at) FROM checks WHERE monitor_id = ?`, id).Scan(&minRaw); err != nil {
 		t.Fatal(err)
