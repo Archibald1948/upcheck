@@ -11,9 +11,6 @@ import (
 )
 
 // status 는 확정된 모니터 상태다.
-//
-// iota 는 const 블록에서 0부터 자동으로 증가하는 값이다.
-// 열거형이 없는 Go 에서 상수 묶음을 만들 때 쓴다.
 type status int
 
 const (
@@ -39,28 +36,17 @@ type monitorState struct {
 	consecutiveFail int
 	consecutiveOK   int
 
-	// notified 는 "사용자에게 마지막으로 알린 상태"다.
-	// confirmed 와 다르면 알릴 거리가 남아 있다는 뜻이다.
-	notified   status
+	notified   status // 사용자에게 마지막으로 알린 상태
 	notifiedAt time.Time
 
-	// firstFailAt 은 현재 연속 실패가 시작된 시각이다.
-	// 장애 시작 시각으로 쓴다 — 확정 시각(3번째 실패)이 아니라
-	// 실제로 죽기 시작한 시각(1번째 실패)이 맞다.
+	// firstFailAt 은 장애 시작 시각이다. 확정 시각(3번째 실패)이 아니라 1번째 실패 시각.
 	firstFailAt time.Time
 	downSince   time.Time
 	downCause   string
 }
 
 // Engine 은 체크 결과를 보고 알릴지 판정한다.
-//
-// 스펙 M3의 세 규칙을 담고 있다.
-//  1. 상태 전이에만 발송 (매 체크마다 보내지 않는다)
-//  2. 플래핑 방지 — 연속 N회 실패해야 down 확정
-//  3. 쿨다운 — 같은 모니터에 X분 내 재발송 금지
-//
-// Observe 는 collector goroutine 하나에서만 불린다.
-// 그래서 states 맵에 뮤텍스가 필요 없다. 호출 지점이 늘어나면 붙여야 한다.
+// Observe 는 collector goroutine 하나에서만 불리므로 states 에 뮤텍스가 없다.
 type Engine struct {
 	store *store.Store
 	ids   map[string]int64
@@ -69,18 +55,14 @@ type Engine struct {
 	log   *slog.Logger
 
 	states map[string]*monitorState
-	now    func() time.Time // 테스트에서 시간을 조작하려고 주입 가능하게 둔다
+	now    func() time.Time
 
-	// atomic 인 이유: Observe 는 collector goroutine 에서만 불리지만
-	// Stats() 는 /metrics 스크레이프에서 불린다.
+	// Stats() 가 /metrics 스크레이프에서 불리므로 atomic.
 	sent       atomic.Int64
 	suppressed atomic.Int64
 }
 
 // EventSink 는 판정된 이벤트를 받는 곳이다.
-//
-// Dispatcher 가 이걸 구현한다. 인터페이스로 끊어두면
-// 테스트에서 가짜 sink 를 넣어 발송 없이 판정만 검증할 수 있다.
 type EventSink interface {
 	Send(ev Event) bool // 큐에 넣었으면 true, 가득 차서 버렸으면 false
 }
@@ -114,9 +96,7 @@ func NewEngine(s *store.Store, ids map[string]int64, rules Rules, sink EventSink
 }
 
 // Restore 는 DB에 열려 있는 장애를 읽어 상태를 복원한다.
-//
-// 이게 없으면 프로그램을 재시작할 때마다 이미 알린 장애로 알림이 다시 간다.
-// 재시작이 잦은 환경(배포, 크래시 루프)에서 알림 폭탄의 원인이 된다.
+// 없으면 재시작할 때마다 이미 알린 장애로 알림이 다시 간다.
 func (e *Engine) Restore(ctx context.Context) error {
 	if e.store == nil {
 		return nil
@@ -129,7 +109,6 @@ func (e *Engine) Restore(ctx context.Context) error {
 		if inc == nil {
 			continue
 		}
-		// 진행 중인 장애가 있다 = 이미 down 을 알렸다고 본다.
 		e.states[name] = &monitorState{
 			confirmed:   statusDown,
 			notified:    statusDown,
@@ -155,8 +134,6 @@ func (e *Engine) Stats() Stats {
 }
 
 // Observe 는 체크 결과 하나를 받아 상태를 갱신하고, 필요하면 이벤트를 낸다.
-//
-// collector 의 onResult 훅에서 불린다.
 func (e *Engine) Observe(ctx context.Context, res checker.Result, target string) {
 	st, ok := e.states[res.Monitor]
 	if !ok {
@@ -168,10 +145,7 @@ func (e *Engine) Observe(ctx context.Context, res checker.Result, target string)
 	e.updateCounters(st, res)
 	e.confirmStatus(st, res)
 
-	// 확정 상태가 바뀌었으면 장애 이력을 남긴다.
-	//
-	// 알림을 실제로 보냈는지와 무관하게 기록한다.
-	// 쿨다운으로 알림이 억제돼도 "무슨 일이 있었는가"는 남아야 한다.
+	// 쿨다운으로 알림이 억제돼도 장애 이력은 남긴다.
 	if st.confirmed != prev {
 		e.recordIncident(ctx, res, st, prev)
 	}
@@ -188,7 +162,6 @@ func (e *Engine) updateCounters(st *monitorState, res checker.Result) {
 	}
 
 	if st.consecutiveFail == 0 {
-		// 이번 연속 실패의 첫 번째다. 장애 시작 시각으로 쓴다.
 		st.firstFailAt = res.CheckedAt
 	}
 	st.consecutiveFail++
@@ -208,8 +181,6 @@ func (e *Engine) confirmStatus(st *monitorState, res checker.Result) {
 	case st.consecutiveOK >= e.rules.SuccessThreshold:
 		st.confirmed = statusUp
 	}
-	// 둘 다 아니면 이전 확정 상태를 유지한다.
-	// 실패 1회로는 아직 down 이 아니고, 그렇다고 up 도 아니다.
 }
 
 // recordIncident 는 장애 시작/해소를 DB에 남긴다.
@@ -225,7 +196,6 @@ func (e *Engine) recordIncident(ctx context.Context, res checker.Result, st *mon
 	switch st.confirmed {
 	case statusDown:
 		if _, err := e.store.OpenIncident(ctx, id, st.downSince, st.downCause); err != nil {
-			// 기록에 실패해도 알림은 계속 가야 한다. 로그만 남긴다.
 			e.log.Error("장애 기록 실패", "monitor", res.Monitor, "err", err)
 		}
 	case statusUp:
@@ -239,33 +209,21 @@ func (e *Engine) recordIncident(ctx context.Context, res checker.Result, st *mon
 
 // maybeNotify 는 세 가지 관문을 거쳐 발송 여부를 정한다.
 func (e *Engine) maybeNotify(st *monitorState, res checker.Result, target string) {
-	// 관문 1: 아직 확정 안 됨 — 알릴 게 없다.
 	if st.confirmed == statusUnknown {
 		return
 	}
 
-	// 관문 2: 이미 알린 상태와 같다 — 새 소식이 아니다.
-	// 스펙 M3 "상태 전이에만 발송. 매 체크마다 보내면 안 됩니다."
 	if st.confirmed == st.notified {
 		return
 	}
 
-	// 기동 직후 첫 확정이 'up' 이면 조용히 넘어간다.
-	// "잘 돌고 있다"는 건 알림거리가 아니다.
-	// notifiedAt 은 일부러 갱신하지 않는다 — 갱신하면 기동 직후 장애가
-	// 쿨다운에 걸려 억제된다.
+	// 기동 직후 첫 up 은 조용히 넘어간다. notifiedAt 을 갱신하면 기동 직후 장애가 쿨다운에 걸린다.
 	if st.notified == statusUnknown && st.confirmed == statusUp {
 		st.notified = statusUp
 		return
 	}
 
-	// 관문 3: 쿨다운.
-	// 스펙 M3 "같은 모니터에 대해 X분 내 재발송 금지."
-	//
-	// 억제해도 st.notified 는 갱신하지 않는다. 그래서 쿨다운이 끝난 뒤
-	// 다음 체크에서 다시 이 지점에 와서 '그때의 실제 상태'를 보낸다.
-	// 알림을 잃는 게 아니라 미루는 것이고, 미룬 사이에 상태가 원래대로
-	// 돌아갔으면 보낼 것도 없어진다. 이게 플래핑 방어의 핵심이다.
+	// 억제해도 st.notified 는 갱신하지 않는다 — 쿨다운 뒤 그때의 실제 상태를 보낸다.
 	now := e.now()
 	if !st.notifiedAt.IsZero() && now.Sub(st.notifiedAt) < e.rules.Cooldown {
 		e.suppressed.Add(1)
