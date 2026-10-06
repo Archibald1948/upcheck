@@ -147,7 +147,6 @@ func TestWebhookRetriesOnServerError(t *testing.T) {
 }
 
 // TestWebhookDoesNotRetryOnClientError 는 4xx 에 재시도하지 않는지 본다.
-// 우리가 잘못 보낸 것이라 다시 보내도 똑같이 실패한다.
 func TestWebhookDoesNotRetryOnClientError(t *testing.T) {
 	srv := newCaptureServer()
 	defer srv.Close()
@@ -183,11 +182,7 @@ func TestWebhookRecoversAfterTransientFailure(t *testing.T) {
 }
 
 // TestWebhookRespectsContextCancel 은 취소가 즉시 먹는지 본다.
-//
-// 핸들러 지연을 짧게 잡은 이유: httptest.Server.Close() 는 처리 중인
-// 요청이 끝날 때까지 기다린다. 클라이언트가 끊어도 서버 쪽 goroutine 은
-// 지연이 끝나야 반환하므로, 지연을 길게 잡으면 그만큼 테스트가 멈춰 선다.
-// 검증 대상은 '클라이언트가 얼마나 빨리 포기하는가'지 서버가 아니다.
+// httptest.Server.Close() 가 처리 중인 요청을 기다리므로 서버 지연은 짧게 둔다.
 func TestWebhookRespectsContextCancel(t *testing.T) {
 	const serverDelay = 800 * time.Millisecond
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -208,7 +203,6 @@ func TestWebhookRespectsContextCancel(t *testing.T) {
 	if err == nil {
 		t.Fatal("취소됐는데 성공으로 반환됐다")
 	}
-	// 취소가 안 먹었다면 서버 지연만큼 기다렸을 것이다.
 	if elapsed >= serverDelay {
 		t.Errorf("취소에 %v 걸렸다 — 서버 지연(%v)을 다 기다린 셈이다", elapsed, serverDelay)
 	}
@@ -234,7 +228,6 @@ func TestFromConfigRejectsBadWebhook(t *testing.T) {
 }
 
 func TestFromConfigWithNoWebhooks(t *testing.T) {
-	// 웹훅이 없어도 판정은 돌아야 한다
 	rules, d, err := FromConfig(config.Alerts{}, quietLogger())
 	if err != nil {
 		t.Fatalf("웹훅 없는 설정이 거부됐다: %v", err)
