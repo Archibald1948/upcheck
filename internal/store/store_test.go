@@ -9,10 +9,7 @@ import (
 	"github.com/Archibald1948/upcheck/internal/config"
 )
 
-// openTest 는 임시 파일 DB 를 연다.
-//
-// ":memory:" 대신 파일을 쓰는 이유: WAL 모드와 PRAGMA 설정까지
-// 실제와 같은 경로로 검증하려는 것이다. t.TempDir() 은 테스트가 끝나면 지워진다.
+// openTest 는 임시 파일 DB 를 연다. WAL·PRAGMA 까지 검증하려고 ":memory:" 를 쓰지 않는다.
 func openTest(t *testing.T) *Store {
 	t.Helper()
 	s, err := Open(context.Background(), filepath.Join(t.TempDir(), "test.db"), discardLogger())
@@ -56,7 +53,6 @@ func TestWALEnabled(t *testing.T) {
 	if err := s.db.QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil {
 		t.Fatalf("journal_mode 조회 실패: %v", err)
 	}
-	// 스펙 7절 함정: SQLite 동시 쓰기 잠금 → WAL 모드
 	if mode != "wal" {
 		t.Errorf("journal_mode = %q, WAL 이어야 한다", mode)
 	}
@@ -119,7 +115,6 @@ func TestSyncMonitors(t *testing.T) {
 	})
 
 	t.Run("설정에서 빠지면 지우지 않고 비활성화한다", func(t *testing.T) {
-		// 기록을 보존해야 하므로 DELETE 가 아니라 enabled=0 이어야 한다.
 		if _, err := s.SyncMonitors(ctx, testMonitors("a")); err != nil {
 			t.Fatalf("SyncMonitors 실패: %v", err)
 		}
