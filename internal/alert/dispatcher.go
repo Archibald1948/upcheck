@@ -15,10 +15,6 @@ const (
 )
 
 // Dispatcher 는 이벤트를 별도 goroutine 에서 발송한다.
-//
-// 스펙 7절 함정: "알림 발송이 체크 루프를 블로킹".
-// 판정(Engine)과 발송(Dispatcher)을 버퍼 채널로 끊어 놓으면,
-// 웹훅 서버가 10초씩 안 받아도 체크는 계속 돈다.
 type Dispatcher struct {
 	notifiers []Notifier
 	events    chan Event
@@ -81,10 +77,7 @@ func (d *Dispatcher) Names() []string {
 }
 
 // Send 는 이벤트를 큐에 넣는다. 절대 블로킹하지 않는다.
-//
 // 큐가 가득 차면 버리고 false 를 돌려준다.
-// 여기서 기다리면 판정 → collector → 스케줄러까지 줄줄이 멈춘다.
-// 알림 몇 개를 잃는 것보다 모니터링이 멈추는 게 훨씬 나쁘다.
 func (d *Dispatcher) Send(ev Event) bool {
 	select {
 	case d.events <- ev:
@@ -112,10 +105,7 @@ func (d *Dispatcher) Stats() DispatcherStats {
 }
 
 // Run 은 이벤트 채널이 닫힐 때까지 발송을 반복한다.
-//
-// ctx 취소로 중간에 빠져나오지 않는다. 종료 중에도 큐에 남은 알림은
-// 보내야 하기 때문이다. "서비스가 죽었다"는 알림을 종료하느라 잃으면 곤란하다.
-// 대신 발송마다 자체 시한을 걸어 무한정 매달리지 않게 한다.
+// 종료 중에도 큐에 남은 알림은 보내야 하므로 ctx 취소로 빠져나오지 않는다.
 func (d *Dispatcher) Run(ctx context.Context) {
 	for ev := range d.events {
 		d.dispatch(ev)
@@ -123,11 +113,7 @@ func (d *Dispatcher) Run(ctx context.Context) {
 }
 
 // dispatch 는 이벤트 하나를 모든 채널에 병렬로 보낸다.
-//
-// 순차로 보내면 느린 채널 하나가 뒤의 채널을 다 막는다.
 func (d *Dispatcher) dispatch(ev Event) {
-	// 상위 ctx 를 쓰지 않는 이유는 Run 의 주석에 있다.
-	// 종료 중에도 발송은 시도하되, 이 시한 안에는 끝낸다.
 	ctx, cancel := context.WithTimeout(context.Background(), d.timeout)
 	defer cancel()
 
