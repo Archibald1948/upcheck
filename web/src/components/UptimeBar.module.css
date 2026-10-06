@@ -2,10 +2,6 @@
   position: relative;
 }
 
-/*
- * 칸 사이 2px 간격은 표면색으로 비워 둔 공간이다(dataviz 마크 규칙).
- * 테두리를 그어 칸을 나누지 않는다 — 데이터가 아닌 잉크가 늘어난다.
- */
 .bar {
   display: flex;
   gap: 2px;
@@ -18,12 +14,12 @@
   min-width: 0;
   border-radius: 2px;
   background: var(--status-none);
-  /* 칸이 좁아서 포인터를 정확히 대기 어렵다. 위아래로 히트 영역을 넓힌다. */
   position: relative;
   outline: none;
   transition: opacity 80ms;
 }
 
+/* 칸이 좁아서 위아래로 히트 영역을 넓힌다 */
 .cell::after {
   content: "";
   position: absolute;
@@ -36,7 +32,6 @@
 .critical { background: var(--status-critical); }
 .none { background: var(--status-none); }
 
-/* 하나에 머무르면 나머지를 살짝 물려서 반응을 보여준다 */
 .bar:has(.active) .cell:not(.active) {
   opacity: 0.55;
 }
@@ -45,10 +40,7 @@
   box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--text-primary);
 }
 
-/*
- * 좁은 화면에서는 최근 30일만 보여준다.
- * 400px 폭에 90칸을 넣으면 칸이 2px 남짓이 되어 읽을 수도, 누를 수도 없다.
- */
+/* 좁은 화면에서는 최근 30일만 (MOBILE_DAYS 와 맞춘다) */
 @media (max-width: 640px) {
   .older {
     display: none;
