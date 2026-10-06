@@ -1,13 +1,4 @@
 // Package alert 는 상태 전이를 판정하고 알림을 보낸다.
-//
-// 세 부분으로 나뉜다.
-//
-//	Engine      체크 결과를 보고 "지금 알려야 하나"를 판정한다 (engine.go)
-//	Dispatcher  판정된 이벤트를 별도 goroutine 에서 실제로 발송한다 (dispatcher.go)
-//	Notifier    발송 채널 하나 (webhook.go 의 Discord / Slack)
-//
-// 판정과 발송을 분리한 이유는 스펙 7절 함정이다.
-// 알림 서버가 느려도 모니터링은 계속돼야 한다.
 package alert
 
 import (
@@ -17,9 +8,6 @@ import (
 )
 
 // Kind 는 이벤트 종류다.
-//
-// 바탕 타입이 string 인 별도 타입을 만들었다. 그냥 string 을 쓰면
-// 아무 문자열이나 들어올 수 있지만, 이렇게 하면 아래 상수들만 쓰게 된다.
 type Kind string
 
 const (
@@ -64,10 +52,7 @@ func (e Event) Body() string {
 }
 
 // humanDuration 은 지속 시간을 읽기 좋게 만든다.
-//
-// 먼저 초 단위로 반올림한다. int(d.Seconds()) 로 바로 자르면 14.9초가
-// "14초"가 되는데, 같은 값을 Duration.Round 로 찍는 -report 출력은
-// "15s"로 나와서 같은 장애가 두 자리에서 다르게 보인다.
+// 자르지 않고 반올림해야 -report 출력(Duration.Round)과 값이 맞는다.
 func humanDuration(d time.Duration) string {
 	d = d.Round(time.Second)
 	sec := int(d.Seconds())
@@ -82,9 +67,6 @@ func humanDuration(d time.Duration) string {
 }
 
 // Notifier 는 알림 발송 채널 하나다.
-//
-// 스펙 M3가 요구한 인터페이스. 새 채널(이메일, 텔레그램 등)을 추가하려면
-// 이 두 메서드만 구현하면 되고, Engine 과 Dispatcher 는 손댈 필요가 없다.
 type Notifier interface {
 	Notify(ctx context.Context, ev Event) error
 	Name() string
@@ -93,14 +75,12 @@ type Notifier interface {
 // Rules 는 알림 판정 규칙이다.
 type Rules struct {
 	// FailureThreshold 회 연속 실패해야 down 으로 확정한다.
-	// 일시적인 네트워크 끊김 하나로 알림이 가는 걸 막는다.
 	FailureThreshold int
 
 	// SuccessThreshold 회 연속 성공해야 up 으로 확정한다.
 	SuccessThreshold int
 
 	// Cooldown 안에는 같은 모니터에 다시 보내지 않는다.
-	// 플래핑 엔드포인트에서 알림 폭탄을 막는 마지막 방어선이다.
 	Cooldown time.Duration
 }
 
