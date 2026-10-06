@@ -22,9 +22,6 @@ func quietLogger() *slog.Logger {
 }
 
 // concurrencyServer 는 동시에 처리 중인 요청 수의 최댓값을 기록하는 테스트 서버다.
-//
-// "워커풀이 동시성을 정말로 제한하는가"는 클라이언트 쪽 코드를 읽어서가 아니라
-// 서버가 실제로 몇 개를 동시에 받았는지로 확인해야 한다.
 type concurrencyServer struct {
 	*httptest.Server
 	current atomic.Int64
@@ -39,7 +36,6 @@ func newConcurrencyServer(delay time.Duration) *concurrencyServer {
 		now := cs.current.Add(1)
 		defer cs.current.Add(-1)
 
-		// 최댓값 갱신 (CAS 루프 — scheduler.go 의 observeLag 와 같은 패턴)
 		for {
 			peak := cs.max.Load()
 			if now <= peak || cs.max.CompareAndSwap(peak, now) {
@@ -69,8 +65,6 @@ func makeMonitors(n int, url string, interval time.Duration) []config.Monitor {
 			TimeoutMS:      2000,
 			ExpectedStatus: 200,
 		}
-		// IntervalSec 은 초 단위 정수라 1초 미만을 표현할 수 없다.
-		// 테스트를 빠르게 돌리려고 0으로 두면 Interval() 이 0이 되는데,
 		// Ticker 는 0 이하 주기를 받으면 panic 한다. 최소 1초로 맞춘다.
 		if ms[i].IntervalSec < 1 {
 			ms[i].IntervalSec = 1
@@ -82,7 +76,7 @@ func makeMonitors(n int, url string, interval time.Duration) []config.Monitor {
 // ─────────────── 핵심: 동시성 상한 ───────────────
 
 // TestPoolBoundsConcurrency 는 워커풀이 동시 요청 수를 workers 이하로
-// 제한하는지 서버 쪽에서 확인한다. 이게 Pool 을 고른 가장 큰 이유다.
+// 제한하는지 서버 쪽에서 확인한다.
 func TestPoolBoundsConcurrency(t *testing.T) {
 	srv := newConcurrencyServer(100 * time.Millisecond)
 	defer srv.Close()
@@ -111,8 +105,7 @@ func TestPoolBoundsConcurrency(t *testing.T) {
 		workers, srv.max.Load(), got)
 }
 
-// TestTickerDoesNotBoundConcurrency 는 비교 대상의 특성을 못 박아 둔다.
-// 모니터마다 goroutine 이 하나씩 생기므로 동시 요청에 상한이 없다.
+// TestTickerDoesNotBoundConcurrency 는 Ticker 방식에 동시 요청 상한이 없음을 확인한다.
 func TestTickerDoesNotBoundConcurrency(t *testing.T) {
 	srv := newConcurrencyServer(150 * time.Millisecond)
 	defer srv.Close()
@@ -129,7 +122,6 @@ func TestTickerDoesNotBoundConcurrency(t *testing.T) {
 	for range ts.Run(ctx, makeMonitors(monitors, srv.URL, time.Second)) {
 	}
 
-	// 모든 모니터가 동시에 시작하므로 동시 요청이 모니터 수만큼 치솟는다.
 	// 정확히 30이라고 단언하면 스케줄링에 따라 흔들릴 수 있으니 여유를 둔다.
 	if max := srv.max.Load(); max < monitors/2 {
 		t.Errorf("동시 요청 최대 %d개 — 모니터 %d개가 동시에 출발했어야 한다", max, monitors)
@@ -139,11 +131,8 @@ func TestTickerDoesNotBoundConcurrency(t *testing.T) {
 
 // ─────────────── 종료와 goroutine 누수 ───────────────
 
-// TestNoGoroutineLeak 은 스펙 6절 완료 기준 1번을 검증한다.
-// 스케줄러를 돌리고 취소한 뒤 goroutine 수가 원래대로 돌아와야 한다.
+// TestNoGoroutineLeak 은 스케줄러를 취소한 뒤 goroutine 수가 원래대로 돌아오는지 본다.
 func TestNoGoroutineLeak(t *testing.T) {
-	// 두 구현을 같은 테스트로 돌린다.
-	// map 대신 슬라이스를 쓰면 실행 순서가 일정하다.
 	impls := []struct {
 		name string
 		make func(*checker.Checker) Scheduler
@@ -169,13 +158,10 @@ func TestNoGoroutineLeak(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			results := s.Run(ctx, makeMonitors(20, srv.URL, time.Second))
 
-			// 결과가 흐르기 시작할 때까지 기다린다
 			<-results
 
 			cancel()
 
-			// 채널이 닫힐 때까지 남은 결과를 비운다.
-			// 여기서 루프가 끝났다는 건 내부 goroutine 이 전부 반환했다는 뜻이다.
 			drained := make(chan struct{})
 			go func() {
 				defer close(drained)
@@ -191,7 +177,6 @@ func TestNoGoroutineLeak(t *testing.T) {
 
 			c.Close() // 유휴 커넥션과 거기 딸린 goroutine 정리
 
-			// goroutine 이 정리될 시간을 준다. 즉시 재지 않고 여러 번 확인한다.
 			got := goroutineCount(t, baseline)
 			if got > baseline+2 {
 				buf := make([]byte, 1<<16)
@@ -204,15 +189,13 @@ func TestNoGoroutineLeak(t *testing.T) {
 }
 
 // goroutineCount 는 goroutine 수가 want 이하로 잦아들 때까지 기다렸다가 센다.
-//
-// 종료 직후에는 아직 정리 중인 goroutine 이 남아 있을 수 있어서
-// 한 번만 재면 테스트가 불안정해진다. want=0 이면 그냥 현재 값을 센다.
+// want=0 이면 그냥 현재 값을 센다.
 func goroutineCount(t *testing.T, want int) int {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	var n int
 	for {
-		runtime.GC() // 정리를 재촉한다
+		runtime.GC()
 		n = runtime.NumGoroutine()
 		if want == 0 || n <= want+2 || time.Now().After(deadline) {
 			return n
@@ -221,10 +204,8 @@ func goroutineCount(t *testing.T, want int) int {
 	}
 }
 
-// TestShutdownIsPrompt 는 취소가 빨리 먹히는지 본다.
-// 스펙 6절 완료 기준: Ctrl+C 시 5초 내 종료.
+// TestShutdownIsPrompt 는 체크 도중 취소가 빨리 먹히는지 본다.
 func TestShutdownIsPrompt(t *testing.T) {
-	// 응답이 아주 느린 서버 — 체크 도중에 취소가 걸리는 상황을 만든다
 	srv := newConcurrencyServer(3 * time.Second)
 	defer srv.Close()
 
@@ -235,7 +216,7 @@ func TestShutdownIsPrompt(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	results := p.Run(ctx, makeMonitors(10, srv.URL, time.Second))
 
-	time.Sleep(200 * time.Millisecond) // 체크가 진행 중인 상태를 만든다
+	time.Sleep(200 * time.Millisecond)
 
 	start := time.Now()
 	cancel()
@@ -252,7 +233,7 @@ func TestShutdownIsPrompt(t *testing.T) {
 // ─────────────── 스케줄링 동작 ───────────────
 
 // TestPoolChecksEveryMonitor 는 과부하 상황에서도 모든 모니터가
-// 최소 한 번은 체크되는지 본다. (굶는 모니터가 없어야 한다)
+// 최소 한 번은 체크되는지 본다.
 func TestPoolChecksEveryMonitor(t *testing.T) {
 	srv := newConcurrencyServer(80 * time.Millisecond)
 	defer srv.Close()
@@ -261,7 +242,6 @@ func TestPoolChecksEveryMonitor(t *testing.T) {
 	c := checker.New()
 	defer c.Close()
 
-	// 워커 2개로 모니터 30개 — 명백한 과부하다.
 	p := NewPool(c, 2, WithLogger(quietLogger()), WithTick(10*time.Millisecond))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -284,7 +264,6 @@ func TestPoolChecksEveryMonitor(t *testing.T) {
 // TestPoolSkipsInflightMonitor 는 이전 체크가 안 끝난 모니터를
 // 큐에 중복으로 넣지 않는지 본다.
 func TestPoolSkipsInflightMonitor(t *testing.T) {
-	// 주기(1초)보다 오래 걸리는 응답
 	srv := newConcurrencyServer(1500 * time.Millisecond)
 	defer srv.Close()
 
@@ -346,7 +325,6 @@ func TestObserveLagKeepsMaximum(t *testing.T) {
 }
 
 // TestCountersAreRaceFree 는 -race 로 돌릴 때 의미가 있다.
-// atomic 대신 평범한 int64 를 썼다면 여기서 race 가 잡힌다.
 func TestCountersAreRaceFree(t *testing.T) {
 	var c counters
 	done := make(chan struct{})
