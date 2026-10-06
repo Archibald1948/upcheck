@@ -11,9 +11,7 @@ import (
 )
 
 // FromConfig 는 설정에서 판정 규칙과 발송기를 만든다.
-//
-// 웹훅 주소가 하나도 없으면 발송 채널이 없는 Dispatcher 를 돌려준다.
-// 그래도 판정과 장애 이력 기록은 그대로 돌아간다 — 알림만 안 나갈 뿐이다.
+// 웹훅 주소가 없으면 발송 채널이 없는 Dispatcher 를 돌려준다.
 func FromConfig(a config.Alerts, log *slog.Logger, opts ...DispatcherOption) (Rules, *Dispatcher, error) {
 	cooldown, err := a.CooldownDuration()
 	if err != nil {
@@ -45,9 +43,6 @@ func FromConfig(a config.Alerts, log *slog.Logger, opts ...DispatcherOption) (Ru
 }
 
 // validateWebhookURL 은 주소가 쓸 만한지 시작 시점에 걸러낸다.
-//
-// 잘못된 주소를 장애가 났을 때 처음 알게 되면 최악이다.
-// 환경변수를 안 넣어서 "${DISCORD_WEBHOOK}" 이 그대로 남은 경우도 여기서 잡힌다.
 func validateWebhookURL(field, raw string) error {
 	if strings.Contains(raw, "${") || strings.Contains(raw, "$") {
 		return fmt.Errorf("alerts.%s: 환경변수가 치환되지 않았다 (%q)", field, raw)

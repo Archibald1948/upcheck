@@ -1,19 +1,6 @@
 // Command seeddemo — 상태 페이지 개발용 90일치 데모 데이터를 만든다.
 //
-//	go run ./cmd/seeddemo -db demo.db
-//	go run ./cmd/upcheck -db demo.db -api-only
-//
-// 90일 업타임 바를 그리려면 90일치 데이터가 있어야 한다. 실제로 90일을
-// 기다릴 수는 없으니 과거 시각으로 체크 결과를 만들어 넣는다.
-//
-// 데이터를 DB에 직접 INSERT 하지 않고 실제 코드 경로를 그대로 탄다.
-//
-//	체크 결과 → store.InsertChecks
-//	          → alert.Engine.Observe  (장애 이력은 판정 엔진이 기록한다)
-//	          → store.Rollup → store.Prune
-//
-// 그래서 이 도구가 만든 데이터가 이상하면 그건 본체 코드의 버그다.
-// 데모 데이터 생성기가 곧 전체 파이프라인의 통합 테스트 역할을 한다.
+// 직접 INSERT 하지 않고 실제 코드 경로(InsertChecks → Engine.Observe → Rollup → Prune)를 탄다.
 package main
 
 import (
@@ -150,7 +137,7 @@ func run() error {
 	engine := alert.NewEngine(st, ids, alert.DefaultRules, nil, log,
 		alert.WithClock(func() time.Time { return simNow }))
 
-	// 시드를 고정한다. 매번 같은 데이터가 나와야 화면을 비교하며 개발할 수 있다.
+	// 시드 고정 — 매번 같은 데이터.
 	rng := rand.New(rand.NewPCG(2026, 914))
 
 	fmt.Printf("%d일 × %d개 모니터 × %v 간격 데모 데이터 생성\n", *days, len(scs), *interval)
@@ -172,8 +159,7 @@ func run() error {
 		return nil
 	}
 
-	// 시간 순서대로 진행한다. 모니터별로 90일을 몰아서 돌면
-	// 장애 이력의 id 순서가 시간 순서와 어긋난다.
+	// 모니터별로 몰아서 돌면 장애 이력의 id 순서가 시간 순서와 어긋난다.
 	for at := from; !at.After(now); at = at.Add(*interval) {
 		simNow = at
 		for i, sc := range scs {
@@ -201,7 +187,6 @@ func run() error {
 	}
 	fmt.Printf("  체크 %d행 저장 · %v\n", total, time.Since(start).Round(time.Millisecond))
 
-	// 실제 데몬의 정리 잡과 똑같이 롤업 → 정리 순서로 돈다.
 	start = time.Now()
 	roll, err := st.Rollup(ctx, now)
 	if err != nil {
@@ -237,7 +222,6 @@ func simulate(sc scenario, at, now time.Time, rng *rand.Rand) checker.Result {
 		CheckedAt: at,
 	}
 
-	// 장애 구간 안이면 실패
 	for _, o := range sc.outages {
 		start := now.Add(-time.Duration(o.daysAgo * float64(24*time.Hour)))
 		if !at.Before(start) && at.Before(start.Add(o.duration)) {
@@ -270,10 +254,7 @@ func simulate(sc scenario, at, now time.Time, rng *rand.Rand) checker.Result {
 	return res
 }
 
-// prepareFile 은 기존 파일을 실수로 덮어쓰지 않게 막는다.
-//
-// 실제 운영 DB 경로를 잘못 넘기면 몇 달 치 기록이 날아간다.
-// 명시적으로 -force 를 줘야만 지운다.
+// prepareFile 은 기존 파일을 실수로 덮어쓰지 않게 막는다. -force 를 줘야만 지운다.
 func prepareFile(path string, force bool) error {
 	if _, err := os.Stat(path); err == nil {
 		if !force {

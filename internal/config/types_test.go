@@ -5,9 +5,6 @@ import (
 )
 
 // TestTypeValidation 은 타입별 target 형식 검증을 확인한다.
-//
-// 잘못된 설정은 첫 체크가 실패할 때가 아니라 로드 시점에 걸려야 한다.
-// 오타 하나로 한밤중에 가짜 장애 알림을 받으면 곤란하다.
 func TestTypeValidation(t *testing.T) {
 	cases := []struct {
 		name    string

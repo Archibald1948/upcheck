@@ -1,13 +1,4 @@
-/*
- * 색 토큰.
- *
- * 값은 dataviz 참조 팔레트에서 가져왔고, 차트 시리즈 색(--series-*)은
- * validate_palette.js 로 라이트/다크 둘 다 검증했다 (CVD ΔE 24.7 / 26.8).
- *
- * 상태 색(--status-*)은 테마를 따라 바뀌지 않는 고정값이다. 라이트 배경에서
- * warning/serious 는 대비가 3:1 에 못 미치므로, 상태 색은 절대 혼자 뜻을
- * 전하지 않는다 — 항상 아이콘·라벨·툴팁과 함께 쓴다.
- */
+/* 상태 색(--status-*)은 라이트에서 warning/serious 대비가 3:1 미만이라 항상 아이콘·라벨과 함께 쓴다. */
 :root {
   color-scheme: light;
 
@@ -80,7 +71,6 @@ a {
   color: inherit;
 }
 
-/* 페이지 틀. 좁은 화면에서도 좌우 16px 여백을 지킨다. */
 .shell {
   max-width: 880px;
   margin: 0 auto;
@@ -135,7 +125,6 @@ a {
   color: var(--text-secondary);
 }
 
-/* 스크린리더에만 보이는 텍스트 */
 .sr-only {
   position: absolute;
   width: 1px;
@@ -148,7 +137,6 @@ a {
   border: 0;
 }
 
-/* 표 보기 (차트의 접근성 쌍둥이) */
 details.table-view {
   margin-top: 12px;
   font-size: 13px;

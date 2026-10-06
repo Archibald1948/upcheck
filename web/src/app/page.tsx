@@ -9,12 +9,9 @@ import { AutoRefresh } from "@/components/AutoRefresh";
 import styles from "./page.module.css";
 
 export default async function StatusPage() {
-  // 두 요청은 서로 기다릴 이유가 없다. 동시에 보낸다.
   const [status, incidents] = await Promise.all([getStatus(), getIncidents(8)]);
 
-  // 모니터마다 90일 이력. 역시 동시에.
-  // (모니터가 수십 개가 되면 요청이 그만큼 늘어난다. 그때는 여러 모니터를
-  //  한 번에 주는 엔드포인트를 Go 쪽에 추가하는 게 맞다.)
+  // 모니터 수만큼 요청이 나간다.
   const histories = await Promise.all(status.monitors.map((m) => getHistory(m.id, 90)));
 
   const overall = OVERALL[status.overall];
@@ -49,8 +46,7 @@ export default async function StatusPage() {
                   {m.name}
                 </Link>
                 <span className={styles.state}>{STATE_LABEL[m.status]}</span>
-                {/* 기간을 반드시 적는다. 좁은 화면에서는 바가 30일만 보이는데
-                    숫자만 있으면 30일 값으로 읽힌다. */}
+                {/* 좁은 화면에선 바가 30일만 보여서 기간을 같이 적는다 */}
                 <span className={styles.periodUptime}>
                   <span className="muted">{days.length}일</span> {formatUptime(periodUptime(days))}
                 </span>

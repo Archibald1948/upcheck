@@ -79,9 +79,6 @@ func TestDailyHistoryAcrossRollupSeam(t *testing.T) {
 }
 
 // TestDailyHistoryRespectsTimezone 은 날짜 경계가 요청한 시간대 자정인지 본다.
-//
-// UTC 3월 9일 20:00 은 서울 기준 3월 10일 05:00 이다.
-// UTC 로 자르면 9일, 서울로 자르면 10일에 들어가야 한다.
 func TestDailyHistoryRespectsTimezone(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
@@ -93,7 +90,7 @@ func TestDailyHistoryRespectsTimezone(t *testing.T) {
 		t.Skipf("시간대 데이터가 없다: %v", err)
 	}
 
-	at := time.Date(2026, 3, 9, 20, 0, 0, 0, time.UTC)
+	at := time.Date(2026, 3, 9, 20, 0, 0, 0, time.UTC) // 서울 기준 3월 10일 05:00
 	if err := s.InsertChecks(ctx, []CheckRow{{MonitorID: id, CheckedAt: at, OK: true, LatencyMS: 50}}); err != nil {
 		t.Fatal(err)
 	}

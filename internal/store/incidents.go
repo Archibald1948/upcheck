@@ -25,9 +25,7 @@ func (i Incident) Duration(now time.Time) time.Duration {
 }
 
 // OpenIncident 는 장애 시작을 기록하고 id 를 돌려준다.
-//
 // 이미 열려 있는 장애가 있으면 새로 만들지 않고 그 id 를 준다.
-// 재시작 직후처럼 메모리 상태가 비어 있을 때 중복 생성을 막는다.
 func (s *Store) OpenIncident(ctx context.Context, monitorID int64, at time.Time, cause string) (int64, error) {
 	if open, err := s.OpenIncidentFor(ctx, monitorID); err != nil {
 		return 0, err
@@ -46,10 +44,7 @@ func (s *Store) OpenIncident(ctx context.Context, monitorID int64, at time.Time,
 	return id, nil
 }
 
-// ResolveIncident 는 열려 있는 장애를 닫는다.
-//
-// 이미 닫혔거나 없으면 아무 일도 하지 않는다 (resolved_at IS NULL 조건).
-// 같은 복구를 두 번 처리해도 시각이 덮어써지지 않는다.
+// ResolveIncident 는 열려 있는 장애를 닫는다. 이미 닫혔거나 없으면 아무 일도 하지 않는다.
 func (s *Store) ResolveIncident(ctx context.Context, monitorID int64, at time.Time) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE incidents SET resolved_at = ?
@@ -61,9 +56,6 @@ func (s *Store) ResolveIncident(ctx context.Context, monitorID int64, at time.Ti
 }
 
 // OpenIncidentFor 는 모니터의 진행 중인 장애를 돌려준다. 없으면 (nil, nil).
-//
-// 프로그램 재시작 시 "이미 알림을 보낸 장애"를 복원하는 데 쓴다.
-// 이게 없으면 재시작할 때마다 같은 장애로 알림이 다시 간다.
 func (s *Store) OpenIncidentFor(ctx context.Context, monitorID int64) (*Incident, error) {
 	var (
 		inc       Incident
@@ -107,7 +99,7 @@ func (s *Store) Incidents(ctx context.Context, monitorID int64, limit int) ([]In
 		var (
 			inc        Incident
 			startedAt  int64
-			resolvedAt sql.NullInt64 // NULL 이 올 수 있으므로 Null 타입으로 받는다
+			resolvedAt sql.NullInt64
 		)
 		if err := rows.Scan(&inc.ID, &inc.MonitorID, &startedAt, &resolvedAt, &inc.Cause); err != nil {
 			return nil, fmt.Errorf("장애 행 읽기 실패: %w", err)

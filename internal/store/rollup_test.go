@@ -45,7 +45,6 @@ func rawUptime(t *testing.T, s *Store, monitorID int64, from, to time.Time) (tot
 }
 
 // TestRollupSkipsCurrentHour 는 진행 중인 시간을 접지 않는지 본다.
-// 아직 체크가 더 들어올 수 있어서 지금 집계하면 반쪽 값이 박힌다.
 func TestRollupSkipsCurrentHour(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
@@ -82,9 +81,6 @@ func TestRollupSkipsCurrentHour(t *testing.T) {
 }
 
 // TestRollupPreservesUptimeExactly 는 롤업이 업타임을 정확히 보존하는지 본다.
-//
-// 개수 합은 결합법칙이 성립하므로, 접어도 값이 달라지면 안 된다.
-// 이게 깨지면 상태 페이지의 업타임 %가 전부 틀어진다.
 func TestRollupPreservesUptimeExactly(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
@@ -120,7 +116,6 @@ func TestRollupPreservesUptimeExactly(t *testing.T) {
 }
 
 // TestRollupIsIdempotent 는 두 번 돌려도 값이 변하지 않는지 본다.
-// 정리 잡은 주기적으로 반복 실행되므로 이게 보장돼야 한다.
 func TestRollupIsIdempotent(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
@@ -151,8 +146,6 @@ func TestRollupIsIdempotent(t *testing.T) {
 // ─────────────── 정리 ───────────────
 
 // TestPruneWaitsForRollup 은 집계 안 된 원본을 지우지 않는지 본다.
-//
-// 이게 깨지면 데이터가 영구히 사라진다. M2에서 제일 위험한 지점이다.
 func TestPruneWaitsForRollup(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
@@ -249,7 +242,6 @@ func TestPruneDropsOldRollups(t *testing.T) {
 func countRows(t *testing.T, s *Store, table string) int64 {
 	t.Helper()
 	var n int64
-	// 테이블 이름은 플레이스홀더로 못 넘긴다. 테스트 내부 상수만 넘기므로 안전하다.
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
 		t.Fatalf("%s 개수 조회 실패: %v", table, err)
 	}

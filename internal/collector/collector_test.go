@@ -87,16 +87,11 @@ func TestCollectorWritesAll(t *testing.T) {
 	}
 }
 
-// TestCollectorFlushesOnCancelledContext 는 M2에서 데이터를 잃기
-// 제일 쉬운 지점을 막았는지 본다.
-//
-// Ctrl+C 를 누르면 ctx 가 취소된 상태로 채널이 닫힌다.
-// 마지막 배치를 취소된 ctx 로 저장하려 하면 즉시 실패해서 통째로 날아간다.
-// collector 는 이때 새 시한을 파서 저장해야 한다.
+// TestCollectorFlushesOnCancelledContext 는 ctx 가 취소된 상태로 채널이 닫혀도
+// 마지막 배치가 저장되는지 본다.
 func TestCollectorFlushesOnCancelledContext(t *testing.T) {
 	s, ids := setup(t, "a")
 
-	// 이미 취소된 context — 종료 직후 상황을 그대로 재현한다
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -106,7 +101,6 @@ func TestCollectorFlushesOnCancelledContext(t *testing.T) {
 	}
 	close(results)
 
-	// 배치 크기를 크게 잡아 중간 flush 없이 마지막에만 저장되게 한다
 	c := New(s, ids, quietLogger(), WithBatchSize(100))
 	if err := c.Run(ctx, results, nil); err != nil {
 		t.Fatalf("Run 실패: %v", err)
@@ -137,7 +131,6 @@ func TestCollectorFlushesOnInterval(t *testing.T) {
 	results <- result("a", true, 10*time.Millisecond)
 	results <- result("a", true, 20*time.Millisecond)
 
-	// 주기 flush 가 돌 때까지 기다린다
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		n, err := s.CountChecks(ctx)
@@ -190,7 +183,6 @@ func TestCollectorDropsUnknownMonitor(t *testing.T) {
 }
 
 // TestCollectorCallsHook 은 onResult 훅이 결과마다 불리는지 본다.
-// M3의 상태 전이 판정이 여기에 붙는다.
 func TestCollectorCallsHook(t *testing.T) {
 	s, ids := setup(t, "a")
 	ctx := context.Background()

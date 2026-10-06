@@ -5,7 +5,6 @@ import type { Day } from "@/lib/types";
 import { formatDay, formatMs, formatShortDay } from "@/lib/format";
 import styles from "./ResponseTimeChart.module.css";
 
-// p50 과 p95 는 단위(ms)가 같아서 축 하나에 둔다. 축을 두 개 두지 않는다.
 const SERIES = [
   { key: "p50_ms", label: "p50 (중앙값)", color: "var(--series-1)" },
   { key: "p95_ms", label: "p95", color: "var(--series-2)" },
@@ -16,12 +15,7 @@ type SeriesKey = (typeof SERIES)[number]["key"];
 const HEIGHT = 244;
 const M = { top: 12, right: 88, bottom: 28, left: 44 }; // 오른쪽은 끝 라벨 자리
 
-/**
- * 일별 응답시간 선 차트.
- *
- * 롤업된 날의 백분위수는 시간별 값을 가중평균한 근사치다(서버 docs/10 참고).
- * 추세를 보기엔 충분하지만 SLA 계산에 쓸 숫자는 아니다.
- */
+// 롤업된 날의 백분위수는 시간별 값을 가중평균한 근사치다.
 export function ResponseTimeChart({ days }: { days: Day[] }) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -59,7 +53,6 @@ export function ResponseTimeChart({ days }: { days: Day[] }) {
 
   return (
     <div>
-      {/* 시리즈가 둘 이상이면 범례는 항상 있다. 색만으로 구분하게 두지 않는다. */}
       <div className={styles.legend}>
         {SERIES.map((s) => (
           <span key={s.key} className={styles.legendItem}>
@@ -86,7 +79,6 @@ export function ResponseTimeChart({ days }: { days: Day[] }) {
           width > 0 && (
             <>
               <svg width={width} height={HEIGHT} aria-hidden>
-                {/* 격자: 1px 실선, 표면에서 한 단계만 벗어난 회색 */}
                 {geo.ticks.map((t) => (
                   <g key={t}>
                     <line x1={M.left} x2={M.left + geo.plotW} y1={geo.y(t)} y2={geo.y(t)} stroke={t === 0 ? "var(--axis)" : "var(--grid)"} strokeWidth={1} shapeRendering="crispEdges" />
@@ -102,7 +94,6 @@ export function ResponseTimeChart({ days }: { days: Day[] }) {
                   </text>
                 ))}
 
-                {/* 크로스헤어: 포인터가 선에 닿지 않아도 날짜를 잡는다 */}
                 {active !== null && (
                   <line x1={geo.x(active)} x2={geo.x(active)} y1={M.top} y2={M.top + geo.plotH} stroke="var(--axis)" strokeWidth={1} shapeRendering="crispEdges" />
                 )}
@@ -111,7 +102,6 @@ export function ResponseTimeChart({ days }: { days: Day[] }) {
                   <path key={s.key} d={geo.paths[s.key]} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
                 ))}
 
-                {/* 끝점 표시 + 직접 라벨. 두 라벨이 겹칠 만큼 가까우면 라벨은 빼고 범례·툴팁에 맡긴다. */}
                 {geo.ends.map((e) => (
                   <g key={e.key}>
                     <circle cx={e.x} cy={e.y} r={4} fill={e.color} stroke="var(--surface)" strokeWidth={2} />
@@ -144,11 +134,9 @@ export function ResponseTimeChart({ days }: { days: Day[] }) {
 }
 
 function Tooltip({ day, x, width }: { day: Day; x: number; width: number }) {
-  // 크로스헤어 오른쪽에 붙이되, 오른쪽 끝에서는 왼쪽으로 넘긴다.
   const style: React.CSSProperties = x > width * 0.6 ? { right: width - x + 12 } : { left: x + 12 };
   return (
     <div className={styles.tooltip} style={style}>
-      {/* 한 툴팁에 모든 시리즈. 값이 먼저, 이름이 뒤. */}
       {[...SERIES].reverse().map((s) => (
         <div key={s.key} className={styles.tipRow}>
           <span className={styles.lineKey} style={{ background: s.color }} aria-hidden />
@@ -191,8 +179,6 @@ function TableView({ days }: { days: Day[] }) {
   );
 }
 
-// ─────────────── 좌표 계산 ───────────────
-
 function layout(days: Day[], width: number) {
   const plotW = Math.max(0, width - M.left - M.right);
   const plotH = HEIGHT - M.top - M.bottom;
@@ -206,7 +192,7 @@ function layout(days: Day[], width: number) {
   const x = (i: number) => M.left + (i / n) * plotW;
   const y = (v: number) => M.top + plotH - (v / top) * plotH;
 
-  // 기록이 없는 날에서는 선을 끊는다. 이어 그리면 없는 값을 지어내는 셈이다.
+  // 기록이 없는 날에서는 선을 끊는다.
   const paths = {} as Record<SeriesKey, string>;
   for (const s of SERIES) {
     let d = "";
@@ -230,17 +216,15 @@ function layout(days: Day[], width: number) {
     }
     return [];
   });
-  // 두 끝 라벨이 14px 안으로 붙으면 겹친다. 억지로 위아래로 밀면 선과 떨어져 오히려 헷갈린다.
+  // 두 끝 라벨이 14px 안으로 붙으면 겹치므로 숨긴다.
   const showEndLabels = ends.length < 2 || Math.abs(ends[0].y - ends[1].y) >= 14;
 
-  // x축 날짜 라벨은 폭에 맞춰 4~6개만
   const count = Math.max(2, Math.min(6, Math.floor(plotW / 110)));
   const xTicks = Array.from({ length: count }, (_, k) => Math.round((k / (count - 1)) * (days.length - 1)));
 
   return { plotW, plotH, ticks, x, y, paths, ends, showEndLabels, xTicks };
 }
 
-/** 0 부터 시작하는 깔끔한 눈금 (0, 100, 200 … / 0, 250, 500 …) */
 function niceTicks(max: number): number[] {
   if (max <= 0) return [0, 100];
   const rough = max / 4;

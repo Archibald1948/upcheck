@@ -11,7 +11,6 @@ import { AutoRefresh } from "@/components/AutoRefresh";
 import styles from "./page.module.css";
 
 export default async function MonitorPage({ params }: { params: Promise<{ id: string }> }) {
-  // Next.js 15 부터 params 는 Promise 다. 동기적으로 꺼내면 안 된다.
   const { id: raw } = await params;
   const id = Number(raw);
   if (!Number.isInteger(id) || id <= 0) notFound();
@@ -19,7 +18,6 @@ export default async function MonitorPage({ params }: { params: Promise<{ id: st
   const [status, history] = await Promise.all([
     getStatus(),
     getHistory(id, 90).catch((err) => {
-      // 없는 모니터는 에러 페이지가 아니라 404 로 보여준다
       if (err instanceof ApiError && err.status === 404) return null;
       throw err;
     }),
@@ -102,7 +100,6 @@ export default async function MonitorPage({ params }: { params: Promise<{ id: st
   );
 }
 
-/** 업타임 바의 표 쌍둥이. 100% 가 아니었던 날만 모아 보여준다. */
 function DayTable({ days }: { days: import("@/lib/types").Day[] }) {
   const rows = days.filter((d) => d.uptime !== null && d.uptime < 100).reverse();
   return (

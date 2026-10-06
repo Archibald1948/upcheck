@@ -2,11 +2,7 @@
 
 import { useEffect } from "react";
 
-// error.tsx 는 클라이언트 컴포넌트여야 한다. 서버에서 난 에러를 받아
-// 브라우저에서 "다시 시도"를 할 수 있어야 하기 때문이다.
-//
-// 서버 에러의 원문(message)은 운영 환경에서 브라우저로 넘어오지 않는다.
-// Next.js 가 일부러 가린다 — 내부 주소나 스택이 새지 않게.
+// 운영 환경에서는 서버 에러 원문(message)을 Next.js 가 가린다.
 export default function ErrorPage({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
     console.error(error);

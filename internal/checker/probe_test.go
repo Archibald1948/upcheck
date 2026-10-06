@@ -22,7 +22,7 @@ import (
 // listenTCP 는 연결을 받아 바로 닫는 서버를 띄운다.
 func listenTCP(t *testing.T) net.Listener {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0") // 포트 0 = OS가 빈 포트를 골라준다
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen 실패: %v", err)
 	}
@@ -30,7 +30,7 @@ func listenTCP(t *testing.T) net.Listener {
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
-				return // 리스너가 닫히면 여기로 온다
+				return
 			}
 			conn.Close()
 		}
@@ -53,14 +53,12 @@ func TestTCPOpenPort(t *testing.T) {
 	if res.Latency <= 0 {
 		t.Error("Latency 가 측정되지 않았다")
 	}
-	// tcp 는 상태 코드 개념이 없다
 	if res.StatusCode != 0 {
 		t.Errorf("StatusCode = %d, tcp 에서는 0 이어야 한다", res.StatusCode)
 	}
 }
 
 func TestTCPClosedPort(t *testing.T) {
-	// 리스너를 띄웠다가 바로 닫아서 '확실히 아무도 없는 포트'를 얻는다.
 	ln := listenTCP(t)
 	addr := ln.Addr().String()
 	ln.Close()
@@ -101,9 +99,6 @@ func TestTCPRespectsCancel(t *testing.T) {
 // ─────────────── tls ───────────────
 
 // newTLSServer 는 지정한 유효기간의 자체 서명 인증서로 TLS 서버를 띄운다.
-//
-// 인증서 만료 경고를 검증하려면 만료일을 내 마음대로 정할 수 있어야 한다.
-// 실제 사이트를 쓰면 만료일이 언제 바뀔지 몰라 테스트가 불안정해진다.
 func newTLSServer(t *testing.T, validFor time.Duration) (addr string, pool *x509.CertPool) {
 	t.Helper()
 
@@ -150,12 +145,7 @@ func newTLSServer(t *testing.T, validFor time.Duration) (addr string, pool *x509
 			if err != nil {
 				return
 			}
-			// 핸드셰이크를 끝낸 뒤에 닫아야 한다.
-			//
-			// tls.Listen 의 Accept 는 연결만 돌려주고 핸드셰이크는
-			// 첫 Read/Write 때 지연 실행된다. 바로 Close 하면
-			// 클라이언트는 인증서를 받아보지도 못하고 EOF 를 만난다.
-			// 그러면 '인증서가 유효한가'를 검증할 수 없다.
+			// 핸드셰이크는 첫 Read/Write 때 지연 실행되므로, 바로 Close 하면 클라이언트가 EOF 를 만난다.
 			go func(c net.Conn) {
 				defer c.Close()
 				if tc, ok := c.(*tls.Conn); ok {
@@ -171,9 +161,6 @@ func newTLSServer(t *testing.T, validFor time.Duration) (addr string, pool *x509
 }
 
 // probeTLS 는 테스트용 CA 를 신뢰하도록 설정한 tlsProber 로 검사한다.
-//
-// 자체 서명 인증서라 시스템 신뢰 저장소에는 없다. 실제 코드에서는
-// 기본 검증을 그대로 쓰지만, 테스트에서는 이 CA 만 추가로 믿게 한다.
 func probeTLS(t *testing.T, m config.Monitor, pool *x509.CertPool) Result {
 	t.Helper()
 	p := &tlsProber{dialer: &net.Dialer{}, rootCAs: pool}
@@ -198,7 +185,7 @@ func TestTLSValidCertificate(t *testing.T) {
 	}
 }
 
-// TestTLSExpiringSoonWarns 는 스펙 M4의 "30일 이하면 경고"를 검증한다.
+// TestTLSExpiringSoonWarns 는 만료 30일 이하면 경고하는지 본다.
 func TestTLSExpiringSoonWarns(t *testing.T) {
 	addr, pool := newTLSServer(t, 10*24*time.Hour) // 10일 남음
 
@@ -207,8 +194,7 @@ func TestTLSExpiringSoonWarns(t *testing.T) {
 		TimeoutMS: 3000, CertWarnDays: 30,
 	}, pool)
 
-	// 핵심: 경고는 나오되 실패는 아니다.
-	// 인증서가 10일 뒤에 만료돼도 서비스는 지금 멀쩡히 돌고 있다.
+	// 경고는 나오되 실패는 아니다.
 	if !res.OK {
 		t.Fatalf("만료 임박은 실패가 아니어야 한다: %v", res.Err)
 	}
@@ -229,7 +215,6 @@ func TestTLSExpiredCertificateFails(t *testing.T) {
 		TimeoutMS: 3000, CertWarnDays: 30,
 	}, pool)
 
-	// 만료된 인증서는 핸드셰이크 자체가 실패한다 = 진짜 장애다
 	if res.OK {
 		t.Fatal("만료된 인증서인데 OK 로 판정됐다")
 	}
@@ -242,7 +227,7 @@ func TestTLSExpiredCertificateFails(t *testing.T) {
 func TestTLSUntrustedCertificateFails(t *testing.T) {
 	addr, _ := newTLSServer(t, 200*24*time.Hour)
 
-	// pool 을 넘기지 않는다 = 시스템 기본 검증. 자체 서명이라 실패해야 한다.
+	// pool 없음 = 시스템 기본 검증.
 	res := probeTLS(t, config.Monitor{
 		Name: "미신뢰", Type: config.TypeTLS, Target: addr,
 		TimeoutMS: 3000, CertWarnDays: 30,
@@ -275,7 +260,6 @@ func TestDNSResolvesLocalhost(t *testing.T) {
 	c := New()
 	defer c.Close()
 
-	// localhost 는 어디서든 127.0.0.1 로 풀린다. 외부 의존이 없다.
 	res := c.Check(context.Background(), config.Monitor{
 		Name: "localhost", Type: config.TypeDNS, Target: "localhost",
 		Record: "A", Expect: []string{"127.0.0.1"}, TimeoutMS: 3000,
@@ -299,7 +283,6 @@ func TestDNSWrongExpectation(t *testing.T) {
 	if res.Err == nil {
 		t.Fatal("Err 가 nil 이다")
 	}
-	// 에러 메시지에 실제 값과 기대값이 둘 다 보여야 진단이 된다
 	msg := res.Err.Error()
 	if !strings.Contains(msg, "127.0.0.1") || !strings.Contains(msg, "10.1.2.3") {
 		t.Errorf("에러에 실제/기대 값이 다 안 보인다: %s", msg)
@@ -311,7 +294,6 @@ func TestDNSNoExpectationJustResolves(t *testing.T) {
 	c := New()
 	defer c.Close()
 
-	// Expect 가 비면 "해석만 되면 정상"
 	res := c.Check(context.Background(), config.Monitor{
 		Name: "해석만", Type: config.TypeDNS, Target: "localhost",
 		Record: "A", TimeoutMS: 3000,

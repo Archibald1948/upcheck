@@ -19,7 +19,7 @@ import (
 
 func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
-// fixedNow 는 테스트의 기준 시각이다. 시간이 흘러도 결과가 같아야 한다.
+// fixedNow 는 테스트의 기준 시각이다.
 var fixedNow = time.Date(2026, 9, 14, 6, 0, 0, 0, time.UTC)
 
 type fixture struct {
@@ -128,7 +128,7 @@ func TestStatus(t *testing.T) {
 }
 
 // TestStatusNullForNoData 는 한 번도 체크 안 한 모니터가 0이 아니라
-// null 로 나가는지 본다. 0% 는 "완전히 죽어 있었다"는 뜻이라 거짓말이다.
+// null 로 나가는지 본다.
 func TestStatusNullForNoData(t *testing.T) {
 	f := newFixture(t)
 	_, body := get(t, f.server(Options{}), "/api/status")
@@ -155,8 +155,7 @@ func TestStatusNullForNoData(t *testing.T) {
 	t.Fatal("new 모니터가 응답에 없다")
 }
 
-// TestDetailsHiddenByDefault 는 공개 상태 페이지에 내부 정보가
-// 새지 않는지 본다. 이게 기본값이어야 한다.
+// TestDetailsHiddenByDefault 는 기본값에서 내부 정보가 새지 않는지 본다.
 func TestDetailsHiddenByDefault(t *testing.T) {
 	f := newFixture(t)
 	h := f.server(Options{}) // ExposeDetails: false
@@ -278,10 +277,6 @@ func TestHistoryBadRequests(t *testing.T) {
 }
 
 // TestMethodNotAllowed 는 GET 전용 경로에 POST 가 오면 405 인지 본다.
-// Go 1.22 ServeMux 가 메서드 패턴으로 자동 처리한다.
-//
-// 처음엔 catch-all 을 "/" 로 걸어서 404 가 나왔다. 메서드 없는 패턴이
-// 모든 요청을 가로채면 ServeMux 가 405 를 판단할 기회가 사라진다.
 func TestMethodNotAllowed(t *testing.T) {
 	f := newFixture(t)
 	h := f.server(Options{})
@@ -291,7 +286,6 @@ func TestMethodNotAllowed(t *testing.T) {
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("POST /api/status → %d, 405 여야 한다", rec.Code)
 	}
-	// 405 응답에는 허용 메서드를 알려주는 Allow 헤더가 붙어야 한다
 	if allow := rec.Header().Get("Allow"); !strings.Contains(allow, "GET") {
 		t.Errorf("Allow 헤더 = %q, GET 이 있어야 한다", allow)
 	}

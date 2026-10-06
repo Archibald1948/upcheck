@@ -10,7 +10,6 @@
   font-weight: 650;
 }
 
-/* 배너의 상태는 왼쪽 굵은 띠 + 아이콘 + 문장으로 전한다. 배경 전체를 칠하지 않는다. */
 .banner[data-level="good"] { box-shadow: inset 4px 0 0 var(--status-good); }
 .banner[data-level="serious"] { box-shadow: inset 4px 0 0 var(--status-serious); }
 .banner[data-level="critical"] { box-shadow: inset 4px 0 0 var(--status-critical); }

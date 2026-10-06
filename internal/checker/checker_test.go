@@ -12,7 +12,6 @@ import (
 )
 
 // httpMonitor 는 http 타입 모니터를 만든다.
-// Type 을 빠뜨리면 Checker 가 Prober 를 못 찾으므로 반드시 채운다.
 func httpMonitor(name, target string) config.Monitor {
 	return config.Monitor{
 		Name: name, Type: config.TypeHTTP, Target: target,
@@ -54,7 +53,6 @@ func TestCheckerRejectsUnknownType(t *testing.T) {
 }
 
 // TestCheckFillsCommonFields 는 Checker 가 공통 필드를 채우는지 본다.
-// Prober 구현체는 이것들을 신경 쓰지 않아도 된다.
 func TestCheckFillsCommonFields(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
@@ -72,7 +70,6 @@ func TestCheckFillsCommonFields(t *testing.T) {
 	if res.Type != config.TypeHTTP {
 		t.Errorf("Type = %q", res.Type)
 	}
-	// 시각은 UTC 로 저장돼야 한다 (스펙 7절 함정)
 	if _, offset := res.CheckedAt.Zone(); offset != 0 {
 		t.Errorf("CheckedAt 이 UTC 가 아니다: %v", res.CheckedAt)
 	}
@@ -153,7 +150,7 @@ func TestHTTPTimeout(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-time.After(2 * time.Second):
-		case <-r.Context().Done(): // 클라이언트가 끊으면 즉시 반환
+		case <-r.Context().Done():
 		}
 	}))
 	defer srv.Close()
@@ -180,7 +177,7 @@ func TestHTTPTimeout(t *testing.T) {
 }
 
 // TestHTTPCancelledContext 는 부모 context 취소(= Ctrl+C)가
-// 진행 중인 요청을 즉시 끊는지 확인한다. M6의 graceful shutdown 기반이다.
+// 진행 중인 요청을 즉시 끊는지 확인한다.
 func TestHTTPCancelledContext(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
@@ -194,7 +191,6 @@ func TestHTTPCancelledContext(t *testing.T) {
 	defer c.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	// 50ms 뒤에 취소한다. time.AfterFunc 는 별도 goroutine 에서 함수를 부른다.
 	time.AfterFunc(50*time.Millisecond, cancel)
 
 	m := httpMonitor("cancel", srv.URL)
@@ -229,17 +225,15 @@ func TestHTTPBadURL(t *testing.T) {
 	}
 }
 
-// TestHTTPReusesClient 는 스펙 7절 함정 1번과 3번을 고정한다.
+// TestHTTPReusesClient 는 클라이언트 재사용과 Client.Timeout 미설정을 고정한다.
 func TestHTTPReusesClient(t *testing.T) {
 	p := newHTTPProber()
 	if p.client == nil {
 		t.Fatal("client 가 nil 이다")
 	}
-	// Client.Timeout 은 비어 있어야 한다. context 로 타임아웃을 걸기 때문이다.
 	if p.client.Timeout != 0 {
 		t.Errorf("Client.Timeout = %v, 0 이어야 한다 (context 로 제어)", p.client.Timeout)
 	}
-	// Checker 를 두 번 Check 해도 같은 클라이언트를 쓴다
 	c := New()
 	defer c.Close()
 	first := c.probers[config.TypeHTTP]
@@ -271,7 +265,7 @@ func TestClassifyErr(t *testing.T) {
 	t.Run("시한 초과", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
 		defer cancel()
-		<-ctx.Done() // 시한이 지날 때까지 기다린다
+		<-ctx.Done()
 		if got := classifyErr(ctx, orig); got.Error() != "타임아웃" {
 			t.Errorf("got %v", got)
 		}

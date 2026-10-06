@@ -1,8 +1,5 @@
 package config
 
-// 테스트 파일은 이름이 _test.go 로 끝나야 하고, 보통 대상과 같은 패키지에 둔다.
-// 같은 패키지에 두면 소문자(unexported) 함수도 테스트할 수 있다.
-
 import (
 	"os"
 	"path/filepath"
@@ -10,9 +7,6 @@ import (
 )
 
 // writeTemp 은 임시 YAML 파일을 만들어 경로를 돌려준다.
-//
-// t.TempDir() 이 만든 디렉터리는 테스트가 끝나면 자동으로 지워진다.
-// t.Helper() 를 부르면 실패 위치가 이 함수가 아니라 '호출한 쪽'으로 찍힌다.
 func writeTemp(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "monitors.yaml")
@@ -35,8 +29,6 @@ monitors:
 	}
 
 	m := cfg.Monitors[0]
-	// 테이블 테스트: 확인할 항목을 슬라이스로 만들어 한 번에 돈다.
-	// Go에서 가장 흔한 테스트 스타일이다.
 	checks := []struct {
 		name string
 		got  any
@@ -77,14 +69,12 @@ monitors:
 	if m.IntervalSec != 5 || m.TimeoutMS != 1500 || m.ExpectedStatus != 204 {
 		t.Errorf("명시한 값이 덮어써졌다: %+v", m)
 	}
-	// Timeout() 이 밀리초를 제대로 Duration 으로 바꾸는지
 	if got := m.Timeout().Milliseconds(); got != 1500 {
 		t.Errorf("Timeout() = %dms, 기대값 1500ms", got)
 	}
 }
 
 func TestLoadRejectsBadConfig(t *testing.T) {
-	// 각 케이스가 에러를 내야 한다.
 	cases := map[string]string{
 		"모니터 없음":   "monitors: []",
 		"이름 없음":    "monitors:\n  - target: https://example.com",
@@ -94,7 +84,6 @@ func TestLoadRejectsBadConfig(t *testing.T) {
 	}
 
 	for name, content := range cases {
-		// t.Run 으로 서브테스트를 만들면 실패 시 어느 케이스인지 이름으로 나온다.
 		t.Run(name, func(t *testing.T) {
 			if _, err := Load(writeTemp(t, content)); err == nil {
 				t.Error("에러를 기대했는데 성공했다")

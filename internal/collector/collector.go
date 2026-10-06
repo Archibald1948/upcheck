@@ -1,11 +1,4 @@
 // Package collector 는 스케줄러가 뱉은 결과를 받아 DB에 쌓는다.
-//
-// 스펙 5절 다이어그램의 collector 자리다.
-//
-//	scheduler → worker × N → resultCh → [collector] → DB
-//
-// 결과 채널을 읽는 곳이 여기 하나뿐이라, SQLite 쓰기가 자연스럽게
-// 한 goroutine 으로 직렬화된다 (스펙 7절 함정: SQLite 동시 쓰기 잠금).
 package collector
 
 import (
@@ -19,7 +12,6 @@ import (
 	"github.com/Archibald1948/upcheck/internal/store"
 )
 
-// 기본값.
 const (
 	defaultBatchSize     = 50
 	defaultFlushInterval = 2 * time.Second
@@ -35,11 +27,7 @@ type Collector struct {
 	batchSize     int
 	flushInterval time.Duration
 
-	// 통계.
-	//
-	// atomic 인 이유: Run 은 collector goroutine 에서 돌고, Stats() 는
-	// /metrics 를 긁는 HTTP 핸들러 goroutine 에서 불린다. 평범한 int64 로
-	// 두면 data race 다 (go test -race 가 잡는다).
+	// Stats() 가 다른 goroutine(/metrics 핸들러)에서 불리므로 atomic 이다.
 	written atomic.Int64
 	dropped atomic.Int64 // DB에 없는 모니터라 버린 결과
 	failed  atomic.Int64 // 저장 실패한 배치의 행 수
@@ -97,13 +85,7 @@ func (c *Collector) Stats() Stats {
 }
 
 // Run 은 results 가 닫힐 때까지 결과를 받아 저장한다.
-//
-// onResult 는 저장과 별개로 결과 하나마다 불린다(콘솔 출력 등). nil 이면 건너뛴다.
-// M3에서 상태 전이 판정과 알림이 여기에 붙는다.
-//
-// results 채널이 닫히는 것이 곧 "스케줄러가 완전히 정리됐다"는 신호다.
-// 그래서 ctx.Done() 을 따로 보지 않고 채널만 끝까지 읽는다.
-// 중간에 빠져나가면 이미 나온 결과를 잃는다.
+// onResult 는 저장과 별개로 결과 하나마다 불린다. nil 이면 건너뛴다.
 func (c *Collector) Run(ctx context.Context, results <-chan checker.Result, onResult func(checker.Result)) error {
 	batch := make([]store.CheckRow, 0, c.batchSize)
 
@@ -114,11 +96,7 @@ func (c *Collector) Run(ctx context.Context, results <-chan checker.Result, onRe
 		select {
 		case res, ok := <-results:
 			if !ok {
-				// 채널이 닫혔다 = 종료. 남은 걸 마저 저장하고 끝낸다.
-				//
-				// ctx 는 이미 취소됐을 가능성이 높다(Ctrl+C 로 여기까지 온 경우).
-				// 취소된 ctx 로는 질의가 즉시 실패하므로 새 시한을 판다.
-				// 이게 없으면 마지막 배치가 통째로 날아간다.
+				// ctx 는 이미 취소됐을 수 있어 새 시한을 판다. 없으면 마지막 배치가 날아간다.
 				flushCtx, cancel := context.WithTimeout(context.Background(), finalFlushTimeout)
 				defer cancel()
 				c.flush(flushCtx, batch)
@@ -139,12 +117,10 @@ func (c *Collector) Run(ctx context.Context, results <-chan checker.Result, onRe
 
 			if len(batch) >= c.batchSize {
 				c.flush(ctx, batch)
-				batch = batch[:0] // 길이만 0으로, 확보한 메모리는 재사용
+				batch = batch[:0]
 			}
 
 		case <-ticker.C:
-			// 배치가 안 차도 주기적으로 비운다.
-			// 이게 없으면 체크가 뜸한 설정에서 결과가 한참 메모리에만 있는다.
 			if len(batch) > 0 {
 				c.flush(ctx, batch)
 				batch = batch[:0]
@@ -180,9 +156,7 @@ func (c *Collector) toRow(res checker.Result) (store.CheckRow, error) {
 		OK:         res.OK,
 		StatusCode: res.StatusCode,
 		Warning:    res.Warning,
-		// Duration 을 밀리초 정수로 접는다. 마이크로초 이하는 버린다 —
-		// 네트워크 응답시간에서 그 정밀도는 의미가 없고, 저장 공간만 먹는다.
-		LatencyMS: res.Latency.Milliseconds(),
+		LatencyMS:  res.Latency.Milliseconds(),
 	}
 	if res.Err != nil {
 		row.Error = res.Err.Error()
