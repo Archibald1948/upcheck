@@ -6,8 +6,7 @@ services:
       context: .
     restart: unless-stopped
     environment:
-      # 로그 시각과 -report 출력에 쓰인다.
-      # 저장은 언제나 UTC 이므로 이 값이 데이터에 섞이지는 않는다.
+      # 로그·-report 출력용. 저장은 언제나 UTC 다.
       TZ: Asia/Seoul
     volumes:
       # SQLite 파일은 이름 있는 볼륨에 둔다. 컨테이너를 다시 만들어도 남는다.
@@ -18,8 +17,6 @@ services:
       - "8484"   # API — web 컨테이너만 부른다
       - "8485"   # 운영 — Prometheus 가 있다면 여기를 긁는다
     healthcheck:
-      # Dockerfile 의 HEALTHCHECK 를 그대로 쓰지만, compose 쪽에도 적어 두면
-      # depends_on 의 조건과 함께 읽기 좋다.
       test: ["CMD", "/usr/local/bin/upcheck", "-healthcheck", "-admin", "127.0.0.1:8485"]
       interval: 30s
       timeout: 5s
@@ -31,17 +28,13 @@ services:
       context: ./web
     restart: unless-stopped
     environment:
-      # 컨테이너 이름이 그대로 호스트 이름이 된다 (compose 내부 DNS).
-      # 이 값을 실행 시점에 읽기 때문에 이미지 하나를 여러 환경에 쓸 수 있다.
-      # 빌드 시점에 박히는 NEXT_PUBLIC_ 을 쓰지 않은 이유다.
+      # 실행 시점에 읽는다 (빌드 시점에 박히는 NEXT_PUBLIC_ 이 아니다).
       UPCHECK_API_URL: http://upcheck:8484
       UPCHECK_TIMEZONE: Asia/Seoul
     ports:
       - "3000:3000"
     depends_on:
       upcheck:
-        # upcheck 가 준비되기 전에는 web 을 띄우지 않는다.
-        # 이 조건이 없으면 첫 화면이 "API 에 연결할 수 없습니다" 로 뜬다.
         condition: service_healthy
 
 volumes:
