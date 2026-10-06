@@ -1,6 +1,3 @@
-// 시각(ISO 문자열) 포맷은 시간대를 인자로 받는다. 시간대 설정은 서버에서만
-// 읽고(lib/api.ts), 서버 컴포넌트가 포맷한 문자열을 넘긴다.
-
 const dayFmt = new Intl.DateTimeFormat("ko-KR", {
   month: "long",
   day: "numeric",
@@ -40,7 +37,6 @@ export function formatNumber(n: number) {
 
 export function formatUptime(u: number | null) {
   if (u === null) return "—";
-  // 100 에 가까운 값은 소수점이 중요하다. 99.95 와 99.5 는 전혀 다르다.
   return `${u === 100 ? "100" : u.toFixed(2)}%`;
 }
 
