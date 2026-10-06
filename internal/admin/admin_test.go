@@ -44,9 +44,6 @@ func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
 }
 
 // TestHealthzIgnoresStore 는 liveness 가 저장소 상태와 무관한지 본다.
-//
-// liveness 실패는 컨테이너 재시작을 부른다. DB 가 잠깐 느리다고
-// 재시작하면 상황만 나빠진다.
 func TestHealthzIgnoresStore(t *testing.T) {
 	s := New(quietLogger(), nil, fakePinger{err: errors.New("DB 죽음")})
 	rec := get(t, s.Handler(), "/healthz")
@@ -79,14 +76,12 @@ func TestReadyzChecksStore(t *testing.T) {
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Errorf("상태 코드 %d, 503 이어야 한다", rec.Code)
 		}
-		// 원인 문자열이 응답에 새면 안 된다. 테이블 이름은 내부 정보다.
 		if strings.Contains(rec.Body.String(), "no such table") {
 			t.Errorf("에러 원문이 응답에 새어 나갔다: %s", rec.Body.String())
 		}
 	})
 
 	t.Run("저장소가 느림", func(t *testing.T) {
-		// 확인이 길어지면 헬스체크 자체가 부하가 된다. 2초 시한이 걸려야 한다.
 		s := New(quietLogger(), nil, fakePinger{delay: 5 * time.Second})
 		start := time.Now()
 		rec := get(t, s.Handler(), "/readyz")
@@ -120,7 +115,6 @@ func TestMetricsEndpoint(t *testing.T) {
 		`upcheck_checks_total{monitor="웹",result="fail",type="http"} 1`,
 		`upcheck_monitor_up{monitor="웹",type="http"} 0`,
 		`upcheck_tls_cert_days_left{monitor="인증서"} 12`,
-		// Go 런타임 지표가 공짜로 따라온다 — goroutine 누수 감시에 쓴다
 		"go_goroutines",
 	}
 	for _, w := range want {
@@ -130,14 +124,12 @@ func TestMetricsEndpoint(t *testing.T) {
 	}
 
 	// 실패한 체크의 응답시간은 히스토그램에 넣지 않는다 (분위수 왜곡 방지).
-	// 성공 1회만 세어져야 한다.
 	if !strings.Contains(body, `upcheck_check_duration_seconds_count{monitor="웹",type="http"} 1`) {
 		t.Error("응답시간 히스토그램이 성공 1회만 세지 않았다")
 	}
 }
 
 // TestMetricsRegistryIsNotGlobal 은 New() 를 여러 번 불러도 안전한지 본다.
-// 전역 레지스트리를 썼다면 두 번째 등록에서 panic 한다.
 func TestMetricsRegistryIsNotGlobal(t *testing.T) {
 	for range 3 {
 		if m := metrics.New(); m.Registry() == nil {
@@ -156,7 +148,6 @@ func TestPprofOnOurMux(t *testing.T) {
 		}
 	}
 
-	// Go 1.27 에 새로 들어온 goroutineleak 프로파일 (스펙 6절 완료 기준)
 	rec := get(t, h, "/debug/pprof/goroutineleak?debug=1")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("goroutineleak → %d\n%s", rec.Code, rec.Body.String())
@@ -167,10 +158,6 @@ func TestPprofOnOurMux(t *testing.T) {
 }
 
 // TestPprofNotExposedByPublicAPI 는 프로파일이 공개 API 에 새지 않는지 본다.
-//
-// net/http/pprof 는 import 되는 것만으로 init() 이 DefaultServeMux 에
-// 핸들러를 등록한다. 그건 막을 수 없다 — 아래에서 실제로 200 이 나오는 걸 확인한다.
-// 그러니 중요한 건 "우리 서버가 DefaultServeMux 를 쓰지 않는 것"이다.
 func TestPprofNotExposedByPublicAPI(t *testing.T) {
 	// 전역 mux 에는 실제로 붙어 있다 (net/http/pprof 의 init 때문)
 	rec := httptest.NewRecorder()
