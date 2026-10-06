@@ -15,9 +15,6 @@ type Retention struct {
 }
 
 // DefaultRetention 은 기본 보관 정책이다.
-//
-// 원본 7일: 최근 일주일은 개별 체크까지 들여다볼 수 있어야 장애를 파헤친다.
-// 롤업 90일: M5의 상태 페이지가 90일 업타임 바를 그린다.
 var DefaultRetention = Retention{
 	Raw:    7 * 24 * time.Hour,
 	Hourly: 90 * 24 * time.Hour,
@@ -30,17 +27,11 @@ type RollupResult struct {
 }
 
 // Rollup 은 아직 집계되지 않은 '완료된 시간'들을 checks_hourly 로 접는다.
-//
-// 현재 진행 중인 시간은 건드리지 않는다. 아직 체크가 더 들어올 수 있어서
-// 지금 집계하면 반쪽짜리 값이 박힌다. 그래서 now 가 속한 정시가 경계다.
+// 진행 중인 시간(now 가 속한 정시 이후)은 건드리지 않는다.
 func (s *Store) Rollup(ctx context.Context, now time.Time) (RollupResult, error) {
 	boundary := unix(truncHour(now))
 	var res RollupResult
 
-	// 어떤 (모니터, 시각) 칸에 집계할 원본이 남아 있는지 먼저 찾는다.
-	//
-	// checked_at / 3600 * 3600 은 정수 나눗셈이라 소수점이 버려진다.
-	// 즉 "정시로 내림". INTEGER 로 저장한 덕에 이 한 줄로 끝난다.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT monitor_id, checked_at / 3600 * 3600 AS hour
 		FROM checks
@@ -64,8 +55,6 @@ func (s *Store) Rollup(ctx context.Context, now time.Time) (RollupResult, error)
 		}
 		buckets = append(buckets, b)
 	}
-	// rows.Err() 는 순회 도중 난 에러를 알려준다.
-	// Next() 가 false 를 반환한 이유가 "끝"인지 "에러"인지 구분하려면 꼭 확인해야 한다.
 	if err := rows.Err(); err != nil {
 		rows.Close()
 		return res, fmt.Errorf("롤업 대상 순회 실패: %w", err)
@@ -93,9 +82,7 @@ func (s *Store) Rollup(ctx context.Context, now time.Time) (RollupResult, error)
 		defer upsert.Close()
 
 		for _, b := range buckets {
-			// 백분위수는 SQL 로 구하기 번거롭다(SQLite 에 percentile 함수가 없다).
-			// 한 시간 치 지연시간을 Go 로 가져와 정렬해서 계산한다.
-			// 모니터 하나의 한 시간이면 많아야 수천 행이라 부담이 없다.
+			// SQLite 에 percentile 함수가 없어서 Go 로 가져와 계산한다.
 			lat, total, okCount, err := s.hourSamples(ctx, tx, b.monitorID, b.hour)
 			if err != nil {
 				return err
@@ -121,9 +108,7 @@ func (s *Store) Rollup(ctx context.Context, now time.Time) (RollupResult, error)
 }
 
 // hourSamples 는 한 시간 치의 성공 지연시간 목록과 전체/성공 개수를 가져온다.
-//
-// 지연시간은 성공한 체크만 모은다. 실패한 체크의 '응답시간'은
-// 타임아웃까지 걸린 시간이라 p95 에 섞으면 수치가 왜곡된다.
+// 실패한 체크의 응답시간은 타임아웃이라 p95 를 왜곡하므로 성공한 것만 모은다.
 func (s *Store) hourSamples(ctx context.Context, tx *sql.Tx, monitorID, hour int64) (lat []int64, total, okCount int, err error) {
 	err = tx.QueryRowContext(ctx, `
 		SELECT COUNT(*), COALESCE(SUM(ok), 0)
@@ -157,11 +142,8 @@ func (s *Store) hourSamples(ctx context.Context, tx *sql.Tx, monitorID, hour int
 	return lat, total, okCount, nil
 }
 
-// percentiles 는 정렬되지 않은 표본에서 p50/p95/최댓값을 구한다.
-//
-// 입력 슬라이스를 그 자리에서 정렬한다(호출부가 재사용하지 않는 걸 전제).
-// 백분위수 계산법은 여러 가지인데 여기서는 '가장 가까운 순위(nearest-rank)'를 쓴다.
-// p95 = 오름차순으로 정렬했을 때 ceil(0.95 × n) 번째 값.
+// percentiles 는 정렬되지 않은 표본에서 p50/p95/최댓값을 구한다(nearest-rank).
+// 입력 슬라이스를 그 자리에서 정렬한다.
 func percentiles(samples []int64) (p50, p95, max int64) {
 	if len(samples) == 0 {
 		return 0, 0, 0
@@ -174,7 +156,6 @@ func quantile(sorted []int64, q float64) int64 {
 	if len(sorted) == 0 {
 		return 0
 	}
-	// nearest-rank: 순위는 1부터 시작하므로 인덱스로 바꿀 때 1을 뺀다.
 	rank := int(float64(len(sorted))*q + 0.9999999)
 	if rank < 1 {
 		rank = 1
@@ -191,11 +172,7 @@ type PruneResult struct {
 	HourlyDeleted int64
 }
 
-// Prune 은 보관 기간이 지난 데이터를 지운다.
-//
-// 원본(checks)을 지우기 전에 반드시 롤업이 끝나 있어야 한다.
-// 안 그러면 집계도 못 한 데이터를 날려버린다. 그래서 Maintain 이
-// Rollup → Prune 순서를 강제한다.
+// Prune 은 보관 기간이 지난 데이터를 지운다. 롤업이 끝난 뒤에 불러야 한다.
 func (s *Store) Prune(ctx context.Context, now time.Time, r Retention) (PruneResult, error) {
 	var res PruneResult
 
@@ -204,8 +181,6 @@ func (s *Store) Prune(ctx context.Context, now time.Time, r Retention) (PruneRes
 
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		// 롤업이 끝난 구간까지만 지운다. 아직 집계 안 된 원본은 남긴다.
-		// COALESCE 는 값이 NULL 이면 대체값을 준다 — 롤업이 한 번도 안 돌았으면
-		// MAX(hour) 가 NULL 이라 자칫 전부 지울 수 있다.
 		var rolledUpTo int64
 		if err := tx.QueryRowContext(ctx,
 			`SELECT COALESCE(MAX(hour) + 3600, 0) FROM checks_hourly`).Scan(&rolledUpTo); err != nil {
@@ -252,9 +227,6 @@ func (s *Store) Maintain(ctx context.Context, now time.Time, r Retention) error 
 }
 
 // RunMaintenance 는 every 주기로 Maintain 을 반복한다. ctx 가 취소되면 끝난다.
-//
-// 별도 goroutine 으로 띄우라는 뜻이 아니라, 이 함수 자체를 goroutine 에서 부른다.
-// 그래야 호출부가 goroutine 의 수명을 눈으로 볼 수 있다.
 func (s *Store) RunMaintenance(ctx context.Context, every time.Duration, r Retention) {
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
@@ -262,8 +234,7 @@ func (s *Store) RunMaintenance(ctx context.Context, every time.Duration, r Reten
 	for {
 		select {
 		case <-ctx.Done():
-			// 종료 직전에 한 번 더 돌려 마지막 구간을 접어 둔다.
-			// ctx 는 이미 취소됐으므로 질의용으로 쓸 수 없다. 짧은 시한을 새로 판다.
+			// 종료 직전에 한 번 더 돈다. ctx 는 이미 취소됐으니 새로 판다.
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if err := s.Maintain(shutdownCtx, time.Now(), r); err != nil {
@@ -273,7 +244,6 @@ func (s *Store) RunMaintenance(ctx context.Context, every time.Duration, r Reten
 
 		case <-ticker.C:
 			if err := s.Maintain(ctx, time.Now(), r); err != nil {
-				// 정리 잡이 실패해도 모니터링은 계속돼야 한다. 로그만 남긴다.
 				s.log.Warn("정리 잡 실패", "err", err)
 			}
 		}
