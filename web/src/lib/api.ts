@@ -2,11 +2,9 @@ import "server-only";
 import { connection } from "next/server";
 import type { HistoryResponse, IncidentsResponse, StatusResponse } from "./types";
 
-// Go API 주소. 브라우저가 아니라 Next.js 서버만 이 주소를 부른다.
 const API_URL = process.env.UPCHECK_API_URL ?? "http://localhost:8484";
 
-// 날짜를 자르는 기준 시간대. 서버에서 렌더링하므로 방문자 브라우저의
-// 시간대는 알 수 없다. 상태 페이지는 운영자가 정한 시간대 하나로 보여준다.
+// 서버 렌더링이라 방문자 시간대는 알 수 없다. 운영자가 정한 시간대 하나로 보여준다.
 export const TIMEZONE = process.env.UPCHECK_TIMEZONE ?? "Asia/Seoul";
 
 export class ApiError extends Error {
@@ -21,14 +19,12 @@ export class ApiError extends Error {
 }
 
 async function getJSON<T>(path: string): Promise<T> {
-  // connection() 은 "이 렌더링은 실제 요청이 올 때 해라"는 표시다.
   await connection();
 
   let res: Response;
   try {
     res = await fetch(`${API_URL}${path}`, {
       cache: "no-store",
-      // Go API 가 멈춰 있으면 페이지 전체가 같이 멈춘다. 시한을 건다.
       signal: AbortSignal.timeout(5000),
     });
   } catch (err) {
