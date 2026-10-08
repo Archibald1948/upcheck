@@ -1,11 +1,4 @@
 // Package admin 은 운영용 엔드포인트를 제공한다.
-//
-//	GET /healthz          살아 있나 (liveness)
-//	GET /readyz           일할 준비가 됐나 (readiness)
-//	GET /metrics          Prometheus 지표
-//	GET /debug/pprof/...  프로파일
-//
-// 공개 API(internal/api)와 다른 포트에 띄운다. 인터넷에 열어 둘 것이 아니다.
 package admin
 
 import (
