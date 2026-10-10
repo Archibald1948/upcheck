@@ -1,6 +1,3 @@
-// Command seeddemo — 상태 페이지 개발용 90일치 데모 데이터를 만든다.
-//
-// 직접 INSERT 하지 않고 실제 코드 경로(InsertChecks → Engine.Observe → Rollup → Prune)를 탄다.
 package main
 
 import (
@@ -20,14 +17,12 @@ import (
 	"github.com/Archibald1948/upcheck/internal/store"
 )
 
-// outage 는 모니터가 죽어 있는 구간이다.
 type outage struct {
 	daysAgo  float64       // 지금부터 며칠 전에 시작하나 (소수 가능)
 	duration time.Duration // 얼마나 지속되나
 	cause    string
 }
 
-// scenario 는 모니터 하나의 90일 이야기다.
 type scenario struct {
 	monitor  config.Monitor
 	baseMS   int     // 평소 응답시간
