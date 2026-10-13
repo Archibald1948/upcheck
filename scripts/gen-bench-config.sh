@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# 로컬 slowserver 를 향하는 모니터 N개짜리 설정을 만든다.
 #   ./scripts/gen-bench-config.sh 50 > configs/bench-50.yaml
 set -euo pipefail
 n="${1:-50}"
