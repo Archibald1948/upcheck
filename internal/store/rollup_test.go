@@ -6,8 +6,7 @@ import (
 	"time"
 )
 
-// seed 는 [from, from+span) 구간에 일정 간격으로 체크를 심는다.
-// failEvery 번째마다 실패로 만든다 (0이면 전부 성공).
+// seed 는 [from, from+span) 구간에 일정 간격으로 체크를 심는다. failEvery 번째마다 실패로 만든다 (0이면 전부 성공).
 func seed(t *testing.T, s *Store, monitorID int64, from time.Time, span, every time.Duration, failEvery int, latencyMS int64) int {
 	t.Helper()
 
