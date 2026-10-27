@@ -1,12 +1,10 @@
 # upcheck
 
-> 셀프호스팅 가용성 모니터링 + 공개 상태 페이지 — Go
+셀프호스팅 가용성 모니터링 + 공개 상태 페이지 — Go
 
 **레포명**: `upcheck` (대안: `pulsewatch`, `sentinela`)
 **언어**: Go 1.27 / TypeScript(상태 페이지)
 **예상 기간**: 2~3주 (M5까지 기준)
-
----
 
 ## 1. 무엇을 만드는가
 
@@ -33,7 +31,7 @@ Uptime Kuma / Better Stack 같은 도구의 축소판을 직접 만듭니다.
 | 메트릭 | `prometheus/client_golang` |
 | 프론트 | Next.js App Router |
 
-> Go 1.27에 **`goroutineleak` 프로파일**이 새로 들어왔습니다 (`/debug/pprof/goroutineleak`). 이 프로젝트는 goroutine 누수가 나기 딱 좋은 구조라, 이걸 실제로 돌려보는 게 훌륭한 학습 소재입니다.
+Go 1.27에 **`goroutineleak` 프로파일**이 새로 들어왔습니다 (`/debug/pprof/goroutineleak`). 이 프로젝트는 goroutine 누수가 나기 딱 좋은 구조라, 이걸 실제로 돌려보는 게 훌륭한 학습 소재입니다.
 
 ## 4. 마일스톤
 
