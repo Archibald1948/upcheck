@@ -1,5 +1,3 @@
-// internal/api/types.go 와 맞춰야 한다.
-
 export type Overall = "operational" | "degraded" | "outage" | "unknown";
 export type MonitorState = "up" | "down" | "unknown";
 
