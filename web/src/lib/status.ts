@@ -45,7 +45,6 @@ export const OVERALL: Record<Overall, { label: string; level: Level }> = {
   unknown: { label: "상태를 확인하는 중입니다", level: "none" },
 };
 
-// 일별 백분율을 평균내지 않고 체크 수로 다시 계산한다 (날마다 체크 수가 다르다).
 export function periodUptime(days: { checks: number; failed: number }[]): number | null {
   let checks = 0;
   let failed = 0;
