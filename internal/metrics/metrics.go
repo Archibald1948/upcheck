@@ -8,7 +8,6 @@ import (
 	"github.com/Archibald1948/upcheck/internal/checker"
 )
 
-// Metrics 는 upcheck 가 내보내는 지표 묶음이다.
 type Metrics struct {
 	reg *prometheus.Registry
 
@@ -18,8 +17,6 @@ type Metrics struct {
 	certDaysLeft  *prometheus.GaugeVec
 }
 
-// New 는 전용 레지스트리에 지표를 등록해서 돌려준다.
-// 전역 레지스트리는 같은 지표를 두 번 등록하면 panic 이라 테스트끼리 간섭한다.
 func New() *Metrics {
 	m := &Metrics{reg: prometheus.NewRegistry()}
 
@@ -79,15 +76,12 @@ func (m *Metrics) ObserveCheck(res checker.Result) {
 	}
 }
 
-// AddGauge 는 오르내리는 값을 그때그때 읽어 가는 게이지를 등록한다.
-// fn 은 스크레이프 goroutine 에서 불리므로 원자적으로 읽을 수 있는 값만 넘겨야 한다.
 func (m *Metrics) AddGauge(name, help string, fn func() float64) {
 	m.reg.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{Name: name, Help: help}, fn,
 	))
 }
 
-// AddCounter 는 줄어들지 않는 누적값을 등록한다. rate() 는 카운터에만 쓸 수 있다.
 func (m *Metrics) AddCounter(name, help string, fn func() float64) {
 	m.reg.MustRegister(prometheus.NewCounterFunc(
 		prometheus.CounterOpts{Name: name, Help: help}, fn,
