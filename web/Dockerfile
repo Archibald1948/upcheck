@@ -1,10 +1,10 @@
-# ─────────────── 1단계: 의존성 ───────────────
+# 1단계: 의존성
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# ─────────────── 2단계: 빌드 ───────────────
+# 2단계: 빌드
 FROM node:22-alpine AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -12,7 +12,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
-# ─────────────── 3단계: 실행 ───────────────
+# 3단계: 실행
 FROM node:22-alpine AS run
 WORKDIR /app
 ENV NODE_ENV=production \
