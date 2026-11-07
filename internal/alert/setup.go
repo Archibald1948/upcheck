@@ -10,8 +10,6 @@ import (
 	"github.com/Archibald1948/upcheck/internal/config"
 )
 
-// FromConfig 는 설정에서 판정 규칙과 발송기를 만든다.
-// 웹훅 주소가 없으면 발송 채널이 없는 Dispatcher 를 돌려준다.
 func FromConfig(a config.Alerts, log *slog.Logger, opts ...DispatcherOption) (Rules, *Dispatcher, error) {
 	cooldown, err := a.CooldownDuration()
 	if err != nil {
